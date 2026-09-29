@@ -1,0 +1,16 @@
+# 密钥（禁止提交）
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+build/
+dist/
+
+# 测试缓存
+.pytest_cache/
+
+# 第三方参考代码（下载的开源项目，不提交）
+source/
