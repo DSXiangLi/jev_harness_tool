@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>gate vs no_skill_needed 选项 — 对比实验</title>
+<style>
+:root {
+  --bg: #0a0c12; --surface: #12151f; --surface2: #1a1e2c; --surface3: #232838;
+  --border: #2a2f3d; --text: #d4d9e8; --text-dim: #6b7390; --text-bright: #f0f2f8;
+  --accent: #5b8def; --choice: #818cf8; --noul: #22d3ee; --gate: #34d399;
+  --fits: #fbbf24; --red: #f87171; --green: #4ade80; --orange: #fb923c;
+  --mono: 'SF Mono','Fira Code','JetBrains Mono',Consolas,monospace;
+  --sans: -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--bg);color:var(--text);font-family:var(--sans);line-height:1.6;overflow-x:hidden}
+.container{max-width:1200px;margin:0 auto;padding:32px 20px 64px}
+.header{border-bottom:1px solid var(--border);padding-bottom:20px;margin-bottom:32px}
+.header h1{font-size:24px;color:var(--text-bright);font-weight:700;margin-bottom:6px}
+.header p{color:var(--text-dim);font-size:13px}
+
+/* approach badge */
+.approach{display:inline-block;padding:3px 12px;border-radius:8px;font-size:12px;font-weight:600;font-family:var(--mono)}
+.ap-gate{background:rgba(52,211,153,.12);color:#6ee7b7;border:1px solid rgba(52,211,153,.3)}
+.ap-none{background:rgba(129,140,248,.12);color:#c7d2fe;border:1px solid rgba(129,140,248,.3)}
+
+/* scenario card */
+.scenario{background:var(--surface);border:1px solid var(--border);border-radius:14px;overflow:hidden;margin-bottom:20px}
+.scenario-head{background:var(--surface2);padding:14px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.scenario-head h3{font-size:15px;color:var(--text-bright);font-weight:600}
+.scenario-type{font-size:10px;font-family:var(--mono);padding:2px 8px;border-radius:999px}
+.type-hit{background:rgba(74,222,128,.12);color:#86efac;border:1px solid rgba(74,222,128,.3)}
+.type-miss{background:rgba(248,113,113,.12);color:#fca5a5;border:1px solid rgba(248,113,113,.3)}
+.type-noskill{background:rgba(251,146,60,.12);color:#fdba74;border:1px solid rgba(251,146,60,.3)}
+.scenario-body{padding:18px 20px}
+
+.query-box{background:#06080d;border:1px solid var(--border);border-radius:8px;padding:10px 14px;font-family:var(--mono);font-size:12px;margin-bottom:16px;color:var(--text-bright)}
+
+/* comparison grid */
+.compare{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.compare-col{background:var(--surface2);border:1px solid var(--border);border-radius:10px;overflow:hidden}
+.compare-head{padding:10px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px}
+.compare-head h4{font-size:13px;color:var(--text-bright);font-weight:600}
+.compare-content{padding:14px}
+
+/* prob bars */
+.bars{margin:6px 0}
+.bar-row{display:flex;align-items:center;gap:8px;margin-bottom:4px}
+.bar-lbl{font-family:var(--mono);font-size:10px;color:var(--text-dim);min-width:130px;text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bar-trk{flex:1;height:20px;background:var(--surface3);border-radius:4px;overflow:hidden;position:relative}
+.bar-fill{height:100%;border-radius:4px;display:flex;align-items:center;padding-left:6px;font-family:var(--mono);font-size:9px;color:rgba(255,255,255,.9);font-weight:700;white-space:nowrap;overflow:hidden;transition:width .6s ease}
+.f-choice{background:linear-gradient(90deg,#6366f1,#818cf8)}
+.f-gate{background:linear-gradient(90deg,#10b981,#34d399)}
+.f-none{background:linear-gradient(90deg,#f59e0b,#fbbf24)}
+.f-thr{background:var(--red);opacity:.4}
+.f-dim{background:var(--surface3);border:1px solid var(--border);color:var(--text-dim)}
+
+/* verdict */
+.verdict{margin-top:10px;padding:8px 12px;border-radius:8px;font-size:12px;font-family:var(--mono);display:flex;align-items:center;gap:8px}
+.v-correct{background:rgba(74,222,128,.08);color:#86efac;border:1px solid rgba(74,222,128,.2)}
+.v-wrong{background:rgba(248,113,113,.08);color:#fca5a5;border:1px solid rgba(248,113,113,.2)}
+.v-ok{background:rgba(74,222,128,.08);color:#86efac;border:1px solid rgba(74,222,128,.2)}
+
+/* summary table */
+.summary{background:var(--surface);border:1px solid var(--border);border-radius:14px;overflow:hidden;margin-top:32px}
+.summary h2{padding:16px 20px;border-bottom:1px solid var(--border);font-size:18px;color:var(--text-bright);font-weight:700}
+.summary table{width:100%;border-collapse:collapse}
+.summary th{background:var(--surface2);padding:10px 14px;text-align:left;font-size:11px;font-family:var(--mono);color:var(--text-dim);text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--border)}
+.summary td{padding:10px 14px;font-size:12px;border-bottom:1px solid var(--border);color:var(--text)}
+.summary td:first-child{font-family:var(--mono);font-size:11px;color:var(--text-dim)}
+.summary .correct{color:#86efac}
+.summary .wrong{color:#fca5a5}
+
+@media(max-width:860px){.compare{grid-template-columns:1fr}.bar-lbl{min-width:100px;font-size:9px}}
+</style>
+</head>
+<body>
+<div class="container">
+
+<div class="header">
+  <h1>gate noul vs choice 中的 no_skill_needed 选项 — 对比实验</h1>
+  <p>5 种典型 query 场景，对比两种存在性兜底方案的决策差异。<span class="approach ap-gate">方案 A: gate noul</span> 只看 query 判断请求是否需要技能；<span class="approach ap-none">方案 B: no_skill_needed 选项</span> 放进 choice criteria，同时看到 query + 全部技能描述。</p>
+</div>
+
+<!-- ===== SCENARIO 1: clear hit ===== -->
+<div class="scenario">
+  <div class="scenario-head">
+    <h3>场景 1：明确命中</h3>
+    <span class="scenario-type type-hit">单技能明确命中</span>
+  </div>
+  <div class="scenario-body">
+    <div class="query-box">query: "帮我做一份 PPT" · roster: [ppt-architect, pdf, db-migrate]</div>
+    <div class="compare">
+      <div class="compare-col">
+        <div class="compare-head"><span class="approach ap-gate">方案 A: gate noul</span></div>
+        <div class="compare-content">
+          <div style="font-size:11px;color:var(--text-dim);margin-bottom:6px;font-family:var(--mono)">gate 只看 query → "需要操作吗？" → 是</div>
+          <div class="bars">
+            <div class="bar-row"><span class="bar-lbl">gate noul</span><div class="bar-trk"><div class="bar-fill f-gate" style="width:80%">0.80</div></div></div>
+            <div class="bar-row"><span class="bar-lbl" style="color:var(--red)">exists_threshold</span><div class="bar-trk"><div class="bar-fill f-thr" style="width:30%">0.30</div></div></div>
+          </div>
+          <div style="font-size:11px;color:var(--text-dim);margin:8px 0 4px;font-family:var(--mono)">gate 通过 → 看 choice 分布</div>
+          <div class="bars">
+            <div class="bar-row"><span class="bar-lbl">s0: ppt-architect</span><div class="bar-trk"><div class="bar-fill f-choice" style="width:85%">0.85</div></div></div>
+            <div class="bar-row"><span class="bar-lbl">s1: pdf</span><div class="bar-trk"><div class="bar-fill f-choice" style="width:10%">0.10</div></div></div>
+            <div class="bar-row"><span class="bar-lbl">s2: db-migrate</span><div class="bar-trk"><div class="bar-fill f-choice" style="width:5%">0.05</div></div></div>
+          </div>
+          <div class="verdict v-correct">✓ gate 通过 → pick ppt-architect → 正确</div>
+        </div>
+      </div>
+      <div class="compare-col">
+        <div class="compare-head"><span class="approach ap-none">方案 B: no_skill_needed 选项</span></div>
+        <div class="compare-content">
+          <div style="font-size:11px;color:var(--text-dim);margin-bottom:6px;font-family:var(--mono)">choice 同时看 query + 全部技能 → "有匹配的吗？" → 有</div>
+          <div class="bars">
+            <div class="bar-row"><span class="bar-lbl">s0: ppt-architect ← winner</span><div class="bar-trk"><div class="bar-fill f-choice" style="width:85%">0.85</div></div></div>
+            <div class="bar-row"><span class="bar-lbl">s1: pdf</span><div class="bar-trk"><div class="bar-fill f-choice" style="width:8%">0.08</div></div></div>
+            <div class="bar-row"><span class="bar-lbl">s2: db-migrate</span><div class="bar-trk"><div class="bar-fill f-choice" style="width:4%">0.04</div></div></div>
+            <div class="bar-row"><span class="bar-lbl" style="color:var(--fits)">no_skill_needed</span><div class="bar-trk"><div class="bar-fill f-none" style="width:3%">0.03</div></div></div>
+          </div>
+          <div style="font-size:11px;color:var(--text-dim);margin:8px 0;font-family:var(--mono)">none 概率很低 → winner p1=0.85 ≥ threshold → auto_select</div>
+          <div class="verdict v-correct">✓ none 很低 → pick ppt-architect → 正确</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== SCENARIO 2: no skill needed ===== -->
+<div class="scenario">
+  <div class="scenario-head">
+    <h3>场景 2：纯文字够用</h3>
+    <span class="scenario-type type-noskill">请求不需要技能</span>
+  </div>
+  <div class="scenario-body">
+    <div class="query-box">query: "解释一下什么是 monad" · roster: [ppt-architect, pdf, db-migrate]</div>
+    <div class="compare">
+      <div class="compare-col">
+        <div class="compare-head"><span class="approach ap-gate">方案 A: gate noul</span></div>
+        <div class="compare-content">
+          <div style="font-size:11px;color:var(--text-dim);margin-bottom:6px;font-family:var(--mono)">gate 只看 query → "需要操作吗？" → 否（纯解释）</div>
+          <div class="bars">
+            <div class="bar-row"><span class="bar-lbl">gate noul</span><div class="bar-trk"><div class="bar-fill f-gate" style="width:12%">0.12</div></div></div>
+            <div class="bar-row"><span class="bar-lbl" style="color:var(--red)">exists_threshold</span><div class="bar-trk"><div class="bar-fill f-thr" style="width:30%">0.30</div></div></div>
+          </div>
+          <div style="font-size:11px;color:var(--text-dim);margin:8px 0;font-family:var(--mono)">gate 0.12 < 0.30 → none_relevant → 跳过 choice</div>
+          <div class="verdict v-correct">✓ gate 拒绝 → 不推荐技能 → 正确</div>
+        </div>
+      </div>
+      <div class="compare-col">
+        <div class="compare-head"><span class="approach ap-none">方案 B: no_skill_needed 选项</span></div>
+        <div class="compare-content">
+          <div style="font-size:11px;color:var(--text-dim);margin-bottom:6px;font-family:var(--mono)">choice 看了 query + 全部技能 → 没有匹配 → no_skill_needed 获得高概率</div>
+          <div class="bars">
+            <div class="bar-row"><span class="bar-lbl">s0: ppt-architect</span><div class="bar-trk"><div class="bar-fill f-choice" style="width:8%">0.08</div></div></div>
+            <div class="bar-row"><span class="bar-lbl">s1: pdf</span><div class="bar-trk"><div class="bar-fill f-choice" style="width:5%">0.05</div></div></div>
+            <div class="bar-row"><span class="bar-lbl">s2: db-migrate</span><div class="bar-trk"><div class="bar-fill f-choice" style="width:3%">0.03</div></div></div>
+            <div class="bar-row"><span class="bar-lbl" style="color:var(--fits)">no_skill_needed ← winner</span><div class="bar-trk"><div class="bar-fill f-none" style="width:84%">0.84</div></div></div>
+          </div>
+          <div style="font-size:11px;color:var(--text-dim);margin:8px 0;font-family:var(--mono)">none 是 argmax → winner=none → 不推荐技能</div>
+          <div class="verdict v-correct">✓ no_skill_needed 胜出 → 不推荐技能 → 正确</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== SCENARIO 3: Mastodon ===== -->
+<div class="scenario">
+  <div class="scenario-head">
+    <h3>场景 3：请求需要技能但 roster 没有（关键差异）</h3>
+    <span class="scenario-type type-miss">roster 覆盖盲区</span>
+  </div>
+  <div class="scenario-body">
+    <div class="query-box">query: "把这个公告发到我的 Mastodon 账号" · roster: [xurl (X/Twitter), computer-use, openhands]</div>
+    <div class="compare">
+      <div class="compare-col">
+        <div class="compare-head"><span class="approach ap-gate">方案 A: gate noul</span></div>
+        <div class="compare-content">
+          <div style="font-size:11px;color:var(--text-dim);margin-bottom:6px;font-family:var(--mono)">gate 只看 query → "需要操作吗？" → 是（发布到社交账号）</div>
+          <div class="bars">
+            <div class="bar-row"><span class="bar-lbl">gate noul</span><div class="bar-trk"><div class="bar-fill f-gate" style="width:78%">0.78</div></div></div>
+            <div class="bar-row"><span class="bar-lbl" style="color:var(--red)">exists_threshold</span><div class="bar-trk"><div class="bar-fill f-thr" style="width:30%">0.30</div></div></div>
+          </div>
+          <div style="font-size:11px;color:var(--text-dim);margin:8px 0 4px;font-family:var(--mono)">gate 通过 → 看 choice 分布（最接近的是 xurl）</div>
+          <div class="bars">
+            <div class="bar-row"><span class="bar-lbl">s0: xurl ← winner</span><div class="bar-trk"><div class="bar-fill f-choice" style="width:55%">0.55</div></div></div>
+            <div class="bar-row"><span class="bar-lbl">s1: computer-use</span><div class="bar-trk"><div class="bar-fill f-choice" style="width:30%">0.30</div></div></div>
+            <div class="bar-row"><span class="bar-lbl">s2: openhands</span><div class="bar-trk"><div class="bar-fill f-choice" style="width:15%">0.15</div></div></div>
+          </div>
+          <div style="font-size:11px;color:var(--text-dim);margin:8px 0;font-family:var(--mono)">gate 看不到 roster → 不知道没有 Mastodon 技能 → 放行</div>
+          <div class="verdict v-wrong">✗ gate 通过 → pick xurl → 错误！推荐了 X/Twitter 技能来发 Mastodon</div>
+        </div>
+      </div>
+      <div class="compare-col">
+        <div class="compare-head"><span class="approach ap-none">方案 B: no_skill_needed 选项</span></div>
+        <div class="compare-content">
+          <div style="font-size:11px;color:var(--text-dim);margin-bottom:6px;font-family:var(--mono)">choice 看了 query + 全部技能 → 没有匹配 Mastodon 的 → no_skill_needed 获得高概率</div>
+          <div class="bars">
+            <div class="bar-row"><span class="bar-lbl">s0: xurl</span><div class="bar-trk"><div class="bar-fill f-choice" style="width:25%">0.25</div></div></div>
+            <div class="bar-row"><span class="bar-lbl">s1: computer-use</span><div class="bar-trk"><div class="bar-fill f-choice" style="width:15%">0.15</div></div></div>
+            <div class="bar-row"><span class="bar-lbl">s2: openhands</span><div class="bar-trk"><div class="bar-fill f-choice" style="width:8%">0.08</div></div></div>
+            <div class="bar-row"><span class="bar-lbl" style="color:var(--fits)">no_skill_needed ← winner</span><div class="bar-trk"><div class="bar-fill f-none" style="width:52%">0.52</div></div></div>
+          </div>
+          <div style="font-size:11px;color:var(--text-dim);margin:8px 0;font-family:var(--mono)">none 是 argmax → winner=none → 不推荐技能</div>
+          <div class="verdict v-correct">✓ no_skill_needed 胜出 → 不推荐技能 → 正确！识别出 roster 无覆盖</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== SCENARIO 4: keyword trap ===== -->
+<div class="scenario">
+  <div class="scenario-head">
+    <h3>场景 4：关键词陷阱</h3>
+    <span class="scenario-type type-miss">关键词重叠但 scope 不匹配</span>
+  </div>
+  <div class="scenario-body">
+    <div class="query-box">query: "介绍一下 PPT 这个文件格式" · roster: [ppt-architect, pdf, db-migrate]</div>
+    <div class="compare">
+      <div class="compare-col">
+        <div class="compare-head"><span class="approach ap-gate">方案 A: gate noul</span></div>
+        <div class="compare-content">
+          <div style="font-size:11px;color:var(--text-dim);margin-bottom:6px;font-family:var(--mono)">gate 只看 query → "需要操作吗？" → 否（纯解释）</div>
+          <div class="bars">
+            <div class="bar-row"><span class="bar-lbl">gate noul</span><div class="bar-trk"><div class="bar-fill f-gate" style="width:18%">0.18</div></div></div>
+            <div class="bar-row"><span class="bar-lbl" style="color:var(--red)">exists_threshold</span><div class="bar-trk"><div class="bar-fill f-thr" style="width:30%">0.30</div></div></div>
+          </div>
+          <div style="font-size:11px;color:var(--text-dim);margin:8px 0;font-family:var(--mono)">gate 0.18 < 0.30 → none_relevant</div>
+          <div class="verdict v-correct">✓ gate 拒绝 → 不推荐技能 → 正确（纯解释不需要技能）</div>
+        </div>
+      </div>
+      <div class="compare-col">
+        <div class="compare-head"><span class="approach ap-none">方案 B: no_skill_needed 选项</span></div>
+        <div class="compare-content">
+          <div style="font-size:11px;color:var(--text-dim);margin-bottom:6px;font-family:var(--mono)">choice 看了 query + 全部技能 → ppt-architect 是"创建"PPT 不是"解释格式"</div>
+          <div class="bars">
+            <div class="bar-row"><span class="bar-lbl">s0: ppt-architect</span><div class="bar-trk"><div class="bar-fill f-choice" style="width:28%">0.28</div></div></div>
+            <div class="bar-row"><span class="bar-lbl">s1: pdf</span><div class="bar-trk"><div class="bar-fill f-choice" style="width:8%">0.08</div></div></div>
+            <div class="bar-row"><span class="bar-lbl">s2: db-migrate</span><div class="bar-trk"><div class="bar-fill f-choice" style="width:4%">0.04</div></div></div>
+            <div class="bar-row"><span class="bar-lbl" style="color:var(--fits)">no_skill_needed ← winner</span><div class="bar-trk"><div class="bar-fill f-none" style="width:60%">0.60</div></div></div>
+          </div>
+          <div style="font-size:11px;color:var(--text-dim);margin:8px 0;font-family:var(--mono)">no_skill_needed 胜出 → 识别出 scope 不匹配（创建 vs 解释）</div>
+          <div class="verdict v-correct">✓ no_skill_needed 胜出 → 不推荐技能 → 正确</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== SCENARIO 5: two lookalikes ===== -->
+<div class="scenario">
+  <div class="scenario-head">
+    <h3>场景 5：双技能近义模糊</h3>
+    <span class="scenario-type type-hit">需要 margin 判据</span>
+  </div>
+  <div class="scenario-body">
+    <div class="query-box">query: "做一个 pitch deck 的 .pptx" · roster: [powerpoint (编辑), pptx-author (创作)]</div>
+    <div class="compare">
+      <div class="compare-col">
+        <div class="compare-head"><span class="approach ap-gate">方案 A: gate noul</span></div>
+        <div class="compare-content">
+          <div style="font-size:11px;color:var(--text-dim);margin-bottom:6px;font-family:var(--mono)">gate 只看 query → "需要操作吗？" → 是 → gate 通过</div>
+          <div class="bars">
+            <div class="bar-row"><span class="bar-lbl">gate noul</span><div class="bar-trk"><div class="bar-fill f-gate" style="width:76%">0.76</div></div></div>
+          </div>
+          <div style="font-size:11px;color:var(--text-dim);margin:8px 0 4px;font-family:var(--mono)">gate 通过 → choice 分布中两个技能接近</div>
+          <div class="bars">
+            <div class="bar-row"><span class="bar-lbl">s0: powerpoint ← winner</span><div class="bar-trk"><div class="bar-fill f-choice" style="width:52%">0.52</div></div></div>
+            <div class="bar-row"><span class="bar-lbl">s1: pptx-author</span><div class="bar-trk"><div class="bar-fill f-choice" style="width:45%">0.45</div></div></div>
+            <div class="bar-row"><span class="bar-lbl">no_skill_needed</span><div class="bar-trk"><div class="bar-fill f-none" style="width:3%">0.03</div></div></div>
+          </div>
+          <div style="font-size:11px;color:var(--text-dim);margin:8px 0;font-family:var(--mono)">margin = 0.52 − 0.45 = 0.07 < 0.15 → low_margin → review</div>
+          <div class="verdict v-ok">○ gate 无法区分 → low_margin review → 保守降级（可接受）</div>
+        </div>
+      </div>
+      <div class="compare-col">
+        <div class="compare-head"><span class="approach ap-none">方案 B: no_skill_needed 选项</span></div>
+        <div class="compare-content">
+          <div style="font-size:11px;color:var(--text-dim);margin-bottom:6px;font-family:var(--mono)">choice 看了 query + 全部技能 → 两个都沾边，但 none 很低</div>
+          <div class="bars">
+            <div class="bar-row"><span class="bar-lbl">s0: powerpoint ← winner</span><div class="bar-trk"><div class="bar-fill f-choice" style="width:52%">0.52</div></div></div>
+            <div class="bar-row"><span class="bar-lbl">s1: pptx-author</span><div class="bar-trk"><div class="bar-fill f-choice" style="width:45%">0.45</div></div></div>
+            <div class="bar-row"><span class="bar-lbl" style="color:var(--fits)">no_skill_needed</span><div class="bar-trk"><div class="bar-fill f-none" style="width:3%">0.03</div></div></div>
+          </div>
+          <div style="font-size:11px;color:var(--text-dim);margin:8px 0;font-family:var(--mono)">margin = 0.07 < 0.15 → low_margin → review（同样降级）</div>
+          <div class="verdict v-ok">○ none 无法区分 → low_margin review → 同样保守降级（可接受）</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== SUMMARY ===== -->
+<div class="summary">
+  <h2>对比总结</h2>
+  <table>
+    <tr><th>场景</th><th>gate noul</th><th>no_skill_needed 选项</th><th>关键差异</th></tr>
+    <tr>
+      <td>1. 明确命中</td>
+      <td class="correct">✓ 正确</td>
+      <td class="correct">✓ 正确</td>
+      <td>两者都能正确推荐</td>
+    </tr>
+    <tr>
+      <td>2. 纯文字够用</td>
+      <td class="correct">✓ gate 拒绝</td>
+      <td class="correct">✓ no_skill_needed 胜出</td>
+      <td>两者都能正确拒绝</td>
+    </tr>
+    <tr>
+      <td>3. roster 覆盖盲区</td>
+      <td class="wrong">✗ gate 误放行</td>
+      <td class="correct">✓ none 正确拒绝</td>
+      <td><b>核心差异</b>：gate 只看 query 不知道 roster 内容；none 同时看 query + roster</td>
+    </tr>
+    <tr>
+      <td>4. 关键词陷阱</td>
+      <td class="correct">✓ gate 拒绝</td>
+      <td class="correct">✓ no_skill_needed 胜出</td>
+      <td>gate 靠"不需要操作"拒绝；none 靠"scope 不匹配"拒绝（更精确）</td>
+    </tr>
+    <tr>
+      <td>5. 双技能模糊</td>
+      <td class="correct">○ low_margin</td>
+      <td class="correct">○ low_margin</td>
+      <td>两者都无法区分，都靠 margin 降级</td>
+    </tr>
+  </table>
+  <div style="padding:16px 20px;font-size:13px;color:var(--text-dim);line-height:1.8">
+    <p style="margin-bottom:8px"><b style="color:var(--text-bright)">结论</b></p>
+    <p>• <b>场景 3 是核心差异</b>：gate noul 只看 query 不知道 roster 内容，无法识别"请求需要技能但 roster 里没有"。no_skill_needed 选项放进 choice criteria，同时看到 query + 全部技能描述，能正确识别 roster 覆盖盲区。</p>
+    <p>• <b>场景 2/4 中两者表现相当</b>：gate 靠请求意图拒绝，none 靠 scope 不匹配拒绝。none 的拒绝理由更精确（"看了 roster 发现不匹配"），gate 的拒绝理由是间接的（"请求不需要操作"）。</p>
+    <p>• <b>no_skill_needed 选项额外优势</b>：少 1 个 question 的 token；不需要单独的 gate_criteria 写进 state；语义更直接（"roster 是否覆盖"比"请求是否需要技能"更贴近实际判断）。</p>
+    <p>• <b>no_skill_needed 选项的代价</b>：none 的概率是归一化分布的一部分，语义随 N 变化（3 个技能时 none 占 1/4，60 个技能时占 1/61）。但实际上 jev 模型按 criteria 语义分配概率，不按均匀先验，所以这个影响有限。</p>
+    <p>• <b>建议</b>：用 no_skill_needed 选项替代 gate noul。在单步路径中，choice criteria 加入 no_skill_needed 选项；在两步路径中，step 1 用 per-skill noul 的 <code>max(p_i) < threshold</code> 做存在性检查，step 2 的 choice 加入 no_skill_needed 选项。</p>
+  </div>
+</div>
+
+</div>
+</body>
+</html>

@@ -12,5 +12,8 @@ dist/
 # 测试缓存
 .pytest_cache/
 
+# IDE
+.idea/
+
 # 第三方参考代码（下载的开源项目，不提交）
 source/

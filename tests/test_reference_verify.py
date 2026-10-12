@@ -407,6 +407,7 @@ async def test_thresholds_and_usage_echo(mock_api, make_client, patched_tool_cli
         "support_threshold": 0.6,
         "relation_margin": 0.2,
         "passage_max_chars": 8000,
+        "context_max_chars": 8000,
     }
     assert data["usage"]["input_tokens"] == 777
     assert data["usage"]["cost_usd"] == pytest.approx(0.0001)
@@ -425,6 +426,110 @@ async def test_custom_threshold_changes_verdict(mock_api, make_client, patched_t
 
     assert strict["results"][0]["verdict"] == "unsupported"
     assert loose["results"][0]["verdict"] == "supported"
+
+
+# ---------- context（passage 所在段落上下文） ----------
+
+
+async def test_context_carried_into_wire_state(mock_api, make_client, patched_tool_client):
+    """传入 context 时出现在 wire state 的对应 pair 中。"""
+    mock_api.push(200, _response(["p0"]))
+    patched_tool_client(make_client(), module=MODULE)
+
+    pair = {**_pair("c"), "context": "该机制自 3.12 起默认启用，适用于全部子解释器。"}
+    data = _unwrap(await _call_tool({"pairs": [pair]}))
+
+    sent = json.loads(mock_api.requests[0].content)
+    assert sent["state"]["pairs"]["p0"] == {
+        "claim": CLAIM,
+        "passage": PASSAGE,
+        "context": "该机制自 3.12 起默认启用，适用于全部子解释器。",
+    }
+    assert data["results"][0]["verdict"] == "supported"
+
+
+async def test_no_context_wire_state_unchanged(mock_api, make_client, patched_tool_client):
+    """不传 context → state 中无 context 键（向后兼容，wire 与旧版一致）。"""
+    mock_api.push(200, _response(["p0"]))
+    patched_tool_client(make_client(), module=MODULE)
+
+    _unwrap(await _call_tool({"pairs": [_pair("x")]}))
+
+    sent = json.loads(mock_api.requests[0].content)
+    assert sent["state"]["pairs"]["p0"] == {"claim": CLAIM, "passage": PASSAGE}
+
+
+async def test_context_empty_or_non_str_treated_as_absent(mock_api, make_client, patched_tool_client):
+    """context 为空串/空白/非 str → 按未提供处理：正常发送、state 无 context 键、无 invalid。"""
+    mock_api.push(200, _response(["p0", "p1", "p2"]))
+    patched_tool_client(make_client(), module=MODULE)
+
+    pairs = [
+        {**_pair("empty"), "context": ""},
+        {**_pair("blank"), "context": "   "},
+        {**_pair("num"), "context": 123},
+    ]
+    data = _unwrap(await _call_tool({"pairs": pairs}))
+
+    sent = json.loads(mock_api.requests[0].content)
+    for key in ("p0", "p1", "p2"):
+        assert "context" not in sent["state"]["pairs"][key]
+    assert all(r["verdict"] == "supported" for r in data["results"])
+    assert all(r["invalid_reason"] is None for r in data["results"])
+
+
+async def test_mixed_pairs_with_and_without_context(mock_api, make_client, patched_tool_client):
+    """同批混合有/无 context 的 pair → 单次 /decide，state 中各自形态正确。"""
+    mock_api.push(200, _response(["p0", "p1"]))
+    patched_tool_client(make_client(), module=MODULE)
+
+    pairs = [_pair("plain"), {**_pair("ctx"), "context": "补充上下文段落。"}]
+    _unwrap(await _call_tool({"pairs": pairs}))
+
+    assert len(mock_api.requests) == 1
+    sent = json.loads(mock_api.requests[0].content)
+    assert "context" not in sent["state"]["pairs"]["p0"]
+    assert sent["state"]["pairs"]["p1"]["context"] == "补充上下文段落。"
+
+
+async def test_context_truncation_never_auto_pass(mock_api, make_client, patched_tool_client):
+    """context 超 context_max_chars → 请求体被截断、truncated=true、
+    即便 mock 返回 support=0.99 + direct_support 也降级 review。"""
+    long_context = "上下文段落。" + "补" * 500
+    mock_api.push(200, _response(["p0"], support=0.99, relation_probs=_probs("direct_support", 0.99)))
+    patched_tool_client(make_client(), module=MODULE)
+
+    pair = {**_pair("t"), "context": long_context}
+    data = _unwrap(await _call_tool({"pairs": [pair], "context_max_chars": 100}))
+
+    sent = json.loads(mock_api.requests[0].content)
+    assert sent["state"]["pairs"]["p0"]["context"] == long_context[:100]  # 头部保留截断
+    r = data["results"][0]
+    assert r["truncated"] is True
+    assert r["verdict"] == "review"  # 截断对永不自动通过
+    assert r["action"] == "review"
+    assert data["thresholds"]["context_max_chars"] == 100
+
+
+async def test_context_contributes_to_budget_batching(mock_api, make_client, patched_tool_client):
+    """大 context 计入 state_tokens 估算，推动分批。"""
+    pairs = [{**_pair(f"b{i}"), "context": "测" * 8000} for i in range(8)]
+    mock_api.push(200, _response([f"p{i}" for i in range(8)], input_tokens=1000))
+    mock_api.push(200, _response([f"p{i}" for i in range(8)], input_tokens=1000))
+    mock_api.push(200, _response([f"p{i}" for i in range(8)], input_tokens=1000))
+    patched_tool_client(make_client(), module=MODULE)
+
+    data = _unwrap(await _call_tool({"pairs": pairs, "context_max_chars": 8000}))
+
+    n_requests = len(mock_api.requests)
+    assert n_requests >= 2
+    assert data["stats"]["batches"] == n_requests
+    assert len(data["results"]) == 8
+    seen_keys = set()
+    for req in mock_api.requests:
+        sent = json.loads(req.content)
+        seen_keys.update(sent["state"]["pairs"].keys())
+    assert seen_keys == {f"p{i}" for i in range(8)}
 
 
 # ---------- 真实 API 测试（烧 credits，默认不跑） ----------

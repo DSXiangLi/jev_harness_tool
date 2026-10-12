@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>skill_search auto 模式 — 数据流可视化</title>
+<style>
+:root {
+  --bg: #0a0c12; --surface: #12151f; --surface2: #1a1e2c; --surface3: #232838;
+  --border: #2a2f3d; --border-glow: #3a4055;
+  --text: #d4d9e8; --text-dim: #6b7390; --text-bright: #f0f2f8;
+  --accent: #5b8def; --choice: #818cf8; --noul: #22d3ee; --gate: #34d399;
+  --fits: #fbbf24; --red: #f87171; --green: #4ade80; --none: #fb923c;
+  --mono: 'SF Mono','Fira Code','JetBrains Mono',Consolas,monospace;
+  --sans: -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--bg);color:var(--text);font-family:var(--sans);line-height:1.6;overflow-x:hidden}
+.container{max-width:1100px;margin:0 auto;padding:32px 20px 64px}
+.header{border-bottom:1px solid var(--border);padding-bottom:20px;margin-bottom:32px}
+.header h1{font-size:24px;color:var(--text-bright);font-weight:700;margin-bottom:6px}
+.header p{color:var(--text-dim);font-size:13px}
+.badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:10px;font-weight:600;font-family:var(--mono);letter-spacing:.3px;vertical-align:middle}
+.b-choice{background:rgba(129,140,248,.12);color:#c7d2fe;border:1px solid rgba(129,140,248,.3)}
+.b-noul{background:rgba(34,211,238,.12);color:#a5f3fc;border:1px solid rgba(34,211,238,.3)}
+.b-fits{background:rgba(251,191,36,.12);color:#fde68a;border:1px solid rgba(251,191,36,.3)}
+.b-post{background:rgba(91,141,239,.12);color:#93b4f7;border:1px solid rgba(91,141,239,.3)}
+.b-none{background:rgba(251,146,60,.12);color:#fdba74;border:1px solid rgba(251,146,60,.3)}
+.play-bar{display:flex;align-items:center;gap:12px;margin-bottom:28px}
+.play-btn{background:linear-gradient(135deg,#5b8def,#7c5cef);color:#fff;border:none;padding:10px 24px;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer;transition:all .2s;box-shadow:0 4px 14px rgba(91,141,239,.3)}
+.play-btn:hover{transform:translateY(-1px);box-shadow:0 6px 20px rgba(91,141,239,.4)}
+.play-btn:disabled{opacity:.4;cursor:default;transform:none;box-shadow:none}
+.play-status{font-family:var(--mono);font-size:12px;color:var(--text-dim);min-height:20px}
+.pipeline{margin-bottom:48px}
+.pipeline-head{display:flex;align-items:center;gap:10px;margin-bottom:20px;flex-wrap:wrap}
+.pipeline-head h2{font-size:18px;color:var(--text-bright);font-weight:700}
+.pipeline-meta{font-family:var(--mono);font-size:11px;color:var(--text-dim);margin-left:auto}
+.stages{display:flex;align-items:stretch;gap:0;position:relative}
+.stage{flex:1;min-width:180px;position:relative;opacity:.15;transform:translateY(8px);transition:opacity .5s ease,transform .5s ease}
+.stage.active{opacity:1;transform:translateY(0)}
+.stage.done{opacity:.35;transform:translateY(0)}
+.stage-body{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:16px;margin:0 5px;min-height:140px;position:relative;overflow:hidden;transition:border-color .4s,box-shadow .4s}
+.stage.active .stage-body{border-color:var(--border-glow);box-shadow:0 0 24px rgba(91,141,239,.08)}
+.stage.active.pick-stage .stage-body{box-shadow:0 0 24px rgba(129,140,248,.1);border-color:rgba(129,140,248,.3)}
+.stage.active.fits-stage .stage-body{box-shadow:0 0 24px rgba(251,191,36,.1);border-color:rgba(251,191,36,.3)}
+.stage.active.recall-stage .stage-body{box-shadow:0 0 24px rgba(34,211,238,.1);border-color:rgba(34,211,238,.3)}
+.stage.active.output-stage .stage-body{box-shadow:0 0 24px rgba(74,222,128,.1);border-color:rgba(74,222,128,.3)}
+.stage-title{font-size:11px;color:var(--text-dim);font-family:var(--mono);margin-bottom:10px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;letter-spacing:.5px;text-transform:uppercase}
+.stage.active .stage-title{color:var(--text)}
+.stage-body::before{content:'';position:absolute;top:0;left:-100%;width:60%;height:100%;background:linear-gradient(90deg,transparent,rgba(255,255,255,.03),transparent);transition:left .8s ease}
+.stage.active .stage-body::before{left:120%}
+.connector{display:flex;align-items:center;justify-content:center;min-width:32px;position:relative}
+.connector-line{width:20px;height:2px;background:var(--border);border-radius:1px;transition:background .4s}
+.connector-arrow{position:absolute;font-size:12px;color:var(--text-dim);background:var(--bg);padding:0 3px;transition:color .4s}
+.connector.active .connector-line{background:var(--accent)}
+.connector.active .connector-arrow{color:var(--accent)}
+.connector-particle{position:absolute;width:4px;height:4px;border-radius:50%;background:var(--accent);opacity:0;top:50%;transform:translateY(-50%)}
+.connector.active .connector-particle{animation:flow 1s ease-in-out}
+@keyframes flow{0%{left:0;opacity:0}30%{opacity:1}70%{opacity:1}100%{left:100%;opacity:0}}
+.data-card{background:#06080d;border:1px solid var(--border);border-radius:8px;padding:12px 14px;font-family:var(--mono);font-size:10.5px;line-height:1.65;overflow-x:auto;color:var(--text-dim)}
+.data-card .k{color:#7dd3fc}.data-card .s{color:#86efac}.data-card .n{color:#fdba74}.data-card .p{color:var(--text-dim)}
+.bars{margin-top:10px}
+.bar-row{display:flex;align-items:center;gap:8px;margin-bottom:5px}
+.bar-lbl{font-family:var(--mono);font-size:10px;color:var(--text-dim);min-width:130px;text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:color .4s}
+.bar-trk{flex:1;height:20px;background:var(--surface3);border-radius:4px;overflow:hidden;position:relative}
+.bar-fill{height:100%;border-radius:4px;display:flex;align-items:center;padding-left:6px;font-family:var(--mono);font-size:9px;color:rgba(255,255,255,.9);font-weight:700;width:0;transition:width 1s cubic-bezier(.34,1.2,.64,1);white-space:nowrap;overflow:hidden}
+.bar-fill.f-choice{background:linear-gradient(90deg,#6366f1,#818cf8);box-shadow:0 0 8px rgba(129,140,248,.3)}
+.bar-fill.f-noul{background:linear-gradient(90deg,#06b6d4,#22d3ee);box-shadow:0 0 8px rgba(34,211,238,.3)}
+.bar-fill.f-fits{background:linear-gradient(90deg,#f59e0b,#fbbf24);box-shadow:0 0 8px rgba(251,191,36,.3)}
+.bar-fill.f-none{background:linear-gradient(90deg,#ea580c,#fb923c);box-shadow:0 0 8px rgba(251,146,60,.3)}
+.bar-fill.f-thr{background:var(--red);opacity:.4}
+.bar-fill.f-dim{background:var(--surface3);border:1px solid var(--border);color:var(--text-dim)}
+.stage:not(.active) .bar-fill{width:0 !important}
+.stage.active .bar-fill{width:var(--w)}
+.bar-fill::after{content:'';position:absolute;top:0;left:-50%;width:30%;height:100%;background:linear-gradient(90deg,transparent,rgba(255,255,255,.15),transparent);transition:left 1.2s ease .3s}
+.stage.active .bar-fill::after{left:120%}
+.vp{display:inline-block;padding:3px 12px;border-radius:6px;font-family:var(--mono);font-size:11px;font-weight:600;opacity:0;transform:scale(.8);transition:all .3s ease}
+.stage.active .vp,.verdict-box .vp{opacity:1;transform:scale(1)}
+.vp-ok{background:rgba(74,222,128,.12);color:#86efac;border:1px solid rgba(74,222,128,.3)}
+.vp-skip{background:rgba(139,147,168,.12);color:#a8b0c4;border:1px solid rgba(139,147,168,.3)}
+.verdict-box{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px 20px;margin-top:16px;opacity:0;transform:translateY(8px);transition:all .5s ease}
+.verdict-box.show{opacity:1;transform:translateY(0)}
+.verdict-box .vr{display:flex;align-items:center;gap:8px;padding:3px 0;font-size:12px}
+.verdict-box .vl{color:var(--text-dim);min-width:140px;font-family:var(--mono);font-size:11px}
+.verdict-box .vv{color:var(--text-bright);font-family:var(--mono);font-size:11px}
+.step-sep{display:flex;align-items:center;justify-content:center;margin:14px 0;gap:10px}
+.step-sep .line{flex:1;height:1px;background:var(--border);max-width:180px}
+.step-sep span{font-family:var(--mono);font-size:10px;color:var(--text-dim);white-space:nowrap;opacity:0;transition:opacity .4s}
+.step-sep.show span{opacity:1}
+.criteria-hint{font-size:10px;color:var(--text-dim);margin-bottom:6px;font-family:var(--mono);line-height:1.5}
+.criteria-hint b{color:var(--text)}
+@media(max-width:860px){.stages{flex-direction:column}.connector{transform:rotate(90deg);min-height:32px;min-width:auto;margin:4px 0}.bar-lbl{min-width:100px;font-size:9px}.pipeline-meta{margin-left:0;width:100%}}
+</style>
+</head>
+<body>
+<div class="container">
+
+<div class="header">
+  <h1>skill_search auto 模式 — 数据流可视化</h1>
+  <p>两条管线展示 jev <code style="color:var(--accent)">/api/v1/decide</code> 从输入到输出的数据流动。<span class="badge b-choice">choice</span> 归一化排序 · <span class="badge b-noul">noul</span> 独立校准 · <span class="badge b-none">no_skill_needed</span> 存在性兜底（放进 choice criteria，同时看到 query + 全部技能描述） · <span class="badge b-fits">fits</span> 绝对匹配检查</p>
+</div>
+
+<div class="play-bar">
+  <button class="play-btn" id="playBtn" onclick="playAll()">▶ 播放动画</button>
+  <span class="play-status" id="playStatus">点击播放，观看数据从输入流经 pick → output 的全过程</span>
+</div>
+
+<!-- ===== PIPELINE 1: single-step ===== -->
+<div class="pipeline">
+  <div class="pipeline-head">
+    <h2>管线 1：单步</h2>
+    <span class="badge b-post">POST ×1</span>
+    <span style="color:var(--text-dim);font-size:12px">skills ≤ 50 → 一次调用完成</span>
+    <span class="pipeline-meta">query: "帮我做一份 PPT" · 3 skills</span>
+  </div>
+
+  <div class="stages" id="p1">
+    <div class="stage" data-step="0">
+      <div class="stage-body">
+        <div class="stage-title">INPUT <span class="badge b-post">/decide</span></div>
+        <div class="data-card">{
+  <span class="k">"state"</span>: {<span class="k">"query"</span>:<span class="s">"帮我做一份PPT"</span>,
+    <span class="k">"context"</span>:<span class="s">"从 roster 中选最佳技能，或判断无需技能"</span>},
+  <span class="k">"questions"</span>: {
+    <span class="k">"pick"</span>: {<span class="k">"type"</span>:<span class="s">"choice"</span>, <span class="k">"criteria"</span>:{
+      <span class="k">"s0"</span>:<span class="s">"ppt-architect: Create slide decks."</span>,
+      <span class="k">"s1"</span>:<span class="s">"pdf: Read, extract PDF."</span>,
+      <span class="k">"s2"</span>:<span class="s">"db-migrate: DB migration."</span>,
+      <span class="k">"__no_skill_needed__"</span>:<span class="s">"无需技能: 纯文字够用或 roster 无覆盖"</span>
+    }}
+  }
+}</div>
+      </div>
+    </div>
+    <div class="connector"><div class="connector-line"></div><span class="connector-arrow">▶</span><div class="connector-particle"></div></div>
+
+    <div class="stage pick-stage" data-step="1">
+      <div class="stage-body">
+        <div class="stage-title">PICK <span class="badge b-choice">choice</span></div>
+        <div class="criteria-hint">choice 同时看到 query + 全部技能 → <b>no_skill_needed</b> 获得低概率（有匹配技能）</div>
+        <div class="bars">
+          <div class="bar-row"><span class="bar-lbl">s0: ppt-architect ← winner</span><div class="bar-trk"><div class="bar-fill f-choice" style="--w:70%">0.70</div></div></div>
+          <div class="bar-row"><span class="bar-lbl">s1: pdf</span><div class="bar-trk"><div class="bar-fill f-choice" style="--w:20%">0.20</div></div></div>
+          <div class="bar-row"><span class="bar-lbl">s2: db-migrate</span><div class="bar-trk"><div class="bar-fill f-choice" style="--w:8%">0.08</div></div></div>
+          <div class="bar-row"><span class="bar-lbl" style="color:var(--none)">__no_skill_needed__</span><div class="bar-trk"><div class="bar-fill f-none" style="--w:2%">0.02</div></div></div>
+        </div>
+        <div style="margin-top:8px"><span class="vp vp-ok">winner ≠ no_skill → margin=0.50 ≥ 0.15 → auto_select</span></div>
+      </div>
+    </div>
+    <div class="connector"><div class="connector-line"></div><span class="connector-arrow">▶</span><div class="connector-particle"></div></div>
+
+    <div class="stage output-stage" data-step="2">
+      <div class="stage-body">
+        <div class="stage-title">OUTPUT</div>
+        <div class="data-card">{
+  <span class="k">"answers"</span>: {
+    <span class="k">"pick"</span>: {<span class="k">"choice"</span>:<span class="s">"s0"</span>,
+      <span class="k">"probabilities"</span>:{<span class="k">"s0"</span>:<span class="n">0.70</span>,
+        <span class="k">"__no_skill_needed__"</span>:<span class="n">0.02</span>,...}}
+  },
+  <span class="k">"usage"</span>: {<span class="k">"input_tokens"</span>:<span class="n">1850</span>}
+}</div>
+        <div style="margin-top:8px"><span class="vp vp-ok">auto_select → ppt-architect</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="verdict-box" id="p1-verdict">
+    <div class="vr"><span class="vl">pick winner</span><span class="vv">s0 → ppt-architect</span><span class="vp vp-ok">p1=0.70 ≥ threshold (0.30)</span></div>
+    <div class="vr"><span class="vl">margin</span><span class="vv">0.50</span><span class="vp vp-ok">≥ margin_threshold (0.15)</span></div>
+    <div class="vr"><span class="vl">no_skill_needed p</span><span class="vv" style="color:var(--none)">0.02</span><span class="vp vp-ok">低 → 有匹配技能</span></div>
+    <div class="vr"><span class="vl">overall_verdict</span><span class="vp vp-ok">auto_select → ppt-architect</span></div>
+    <div class="vr"><span class="vl">none_probability</span><span class="vv">0.02</span></div>
+  </div>
+</div>
+
+<!-- ===== PIPELINE 2: two-step ===== -->
+<div class="pipeline">
+  <div class="pipeline-head">
+    <h2>管线 2：两步</h2>
+    <span class="badge b-post">POST ×B批</span><span class="badge b-post">POST ×1</span>
+    <span style="color:var(--text-dim);font-size:12px">skills > 50 → noul 召回 → choice 精排</span>
+    <span class="pipeline-meta">query: "配置我的数据库迁移流程" · 60 skills</span>
+  </div>
+
+  <div class="stages" id="p2s1">
+    <div class="stage" data-step="0">
+      <div class="stage-body">
+        <div class="stage-title">STEP 1 INPUT <span class="badge b-post">/decide ×B</span></div>
+        <div class="data-card">{
+  <span class="k">"state"</span>: {<span class="k">"query"</span>:<span class="s">"配置数据库迁移流程"</span>},
+  <span class="k">"questions"</span>: {
+    <span class="k">"s0"</span>: {<span class="k">"type"</span>:<span class="s">"noul"</span>, <span class="k">"instructions"</span>:<span class="s">"Skill \"db-migrate\" is described as: Plan and execute DB migrations.\n\nIs this skill relevant?"</span>},
+    <span class="k">"s1"</span>: {<span class="k">"type"</span>:<span class="s">"noul"</span>},
+    <span class="p">... 每技能一个 noul</span>
+  }
+}</div>
+      </div>
+    </div>
+    <div class="connector"><div class="connector-line"></div><span class="connector-arrow">▶</span><div class="connector-particle"></div></div>
+
+    <div class="stage recall-stage" data-step="1">
+      <div class="stage-body">
+        <div class="stage-title">RECALL <span class="badge b-noul">noul ×60</span></div>
+        <div class="criteria-hint">按概率降序取 <b style="color:var(--noul)">top-5</b> · max(p_i) ≥ exists_threshold? YES → 继续</div>
+        <div class="bars">
+          <div class="bar-row"><span class="bar-lbl">s0: db-migrate</span><div class="bar-trk"><div class="bar-fill f-noul" style="--w:92%">0.92</div></div></div>
+          <div class="bar-row"><span class="bar-lbl">s15: sql-optimizer</span><div class="bar-trk"><div class="bar-fill f-noul" style="--w:45%">0.45</div></div></div>
+          <div class="bar-row"><span class="bar-lbl">s2: sql-optimizer</span><div class="bar-trk"><div class="bar-fill f-noul" style="--w:35%">0.35</div></div></div>
+          <div class="bar-row"><span class="bar-lbl">s42: git-history</span><div class="bar-trk"><div class="bar-fill f-noul" style="--w:18%">0.18</div></div></div>
+          <div class="bar-row"><span class="bar-lbl">s1: docker-ops</span><div class="bar-trk"><div class="bar-fill f-noul" style="--w:15%">0.15</div></div></div>
+          <div class="bar-row"><span class="bar-lbl" style="color:var(--text-dim)">其余 55 个</span><div class="bar-trk"><div class="bar-fill f-dim" style="--w:10%">≤0.12</div></div></div>
+        </div>
+        <div style="margin-top:8px"><span class="vp vp-ok">max(p_i)=0.92 ≥ 0.30 → 继续 step 2</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="step-sep" id="p2-sep">
+    <div class="line"></div>
+    <span>↓ top-5 进入 Step 2 ↓</span>
+    <div class="line"></div>
+  </div>
+
+  <div class="stages" id="p2s2">
+    <div class="stage" data-step="0">
+      <div class="stage-body">
+        <div class="stage-title">STEP 2 INPUT <span class="badge b-post">/decide ×1</span></div>
+        <div class="data-card">{
+  <span class="k">"state"</span>: {<span class="k">"query"</span>:<span class="s">"配置数据库迁移流程"</span>},
+  <span class="k">"questions"</span>: {
+    <span class="k">"pick"</span>: {<span class="k">"type"</span>:<span class="s">"choice"</span>, <span class="k">"criteria"</span>:{
+      <span class="k">"s0"</span>:<span class="s">"db-migrate: Plan..."</span>,
+      <span class="p">... top-5</span>
+      <span class="k">"__no_skill_needed__"</span>:<span class="s">"无需技能: 纯文字够用或 roster 无覆盖"</span>
+    }},
+    <span class="k">"fits::s0"</span>: {<span class="k">"type"</span>:<span class="s">"noul"</span>},
+    <span class="p">... fits ×5</span>
+  }
+}</div>
+      </div>
+    </div>
+    <div class="connector"><div class="connector-line"></div><span class="connector-arrow">▶</span><div class="connector-particle"></div></div>
+
+    <div class="stage fits-stage" data-step="1">
+      <div class="stage-body">
+        <div class="stage-title">FITS <span class="badge b-fits">fits noul ×5</span></div>
+        <div class="criteria-hint">max(fits) = <b style="color:var(--fits)">0.88</b> ≥ 0.30 → 有候选真正 fit</div>
+        <div class="bars">
+          <div class="bar-row"><span class="bar-lbl">fits::s0 (db-migrate)</span><div class="bar-trk"><div class="bar-fill f-fits" style="--w:88%">0.88</div></div></div>
+          <div class="bar-row"><span class="bar-lbl">fits::s15</span><div class="bar-trk"><div class="bar-fill f-fits" style="--w:20%">0.20</div></div></div>
+          <div class="bar-row"><span class="bar-lbl">fits::s2</span><div class="bar-trk"><div class="bar-fill f-fits" style="--w:15%">0.15</div></div></div>
+          <div class="bar-row"><span class="bar-lbl">fits::s42</span><div class="bar-trk"><div class="bar-fill f-fits" style="--w:5%">0.05</div></div></div>
+          <div class="bar-row"><span class="bar-lbl">fits::s1</span><div class="bar-trk"><div class="bar-fill f-fits" style="--w:8%">0.08</div></div></div>
+        </div>
+      </div>
+    </div>
+    <div class="connector"><div class="connector-line"></div><span class="connector-arrow">▶</span><div class="connector-particle"></div></div>
+
+    <div class="stage pick-stage" data-step="2">
+      <div class="stage-body">
+        <div class="stage-title">PICK <span class="badge b-choice">choice</span></div>
+        <div class="criteria-hint">margin = 0.75 − 0.12 = <b style="color:var(--choice)">0.63</b> ≥ 0.15 ✓</div>
+        <div class="bars">
+          <div class="bar-row"><span class="bar-lbl">s0: db-migrate ← winner</span><div class="bar-trk"><div class="bar-fill f-choice" style="--w:75%">0.75</div></div></div>
+          <div class="bar-row"><span class="bar-lbl">s15: sql-optimizer</span><div class="bar-trk"><div class="bar-fill f-choice" style="--w:12%">0.12</div></div></div>
+          <div class="bar-row"><span class="bar-lbl">s2 / s42 / s1</span><div class="bar-trk"><div class="bar-fill f-choice" style="--w:11%">0.11</div></div></div>
+          <div class="bar-row"><span class="bar-lbl" style="color:var(--none)">__no_skill_needed__</span><div class="bar-trk"><div class="bar-fill f-none" style="--w:2%">0.02</div></div></div>
+        </div>
+      </div>
+    </div>
+    <div class="connector"><div class="connector-line"></div><span class="connector-arrow">▶</span><div class="connector-particle"></div></div>
+
+    <div class="stage output-stage" data-step="3">
+      <div class="stage-body">
+        <div class="stage-title">OUTPUT</div>
+        <div class="data-card">{
+  <span class="k">"answers"</span>: {
+    <span class="k">"pick"</span>: {<span class="k">"choice"</span>:<span class="s">"s0"</span>,
+      <span class="k">"probabilities"</span>:{<span class="k">"s0"</span>:<span class="n">0.75</span>,
+        <span class="k">"__no_skill_needed__"</span>:<span class="n">0.02</span>,...}},
+    <span class="k">"fits::s0"</span>: {<span class="k">"noul"</span>:<span class="n">0.88</span>}
+  },
+  <span class="k">"usage"</span>: {<span class="k">"input_tokens"</span>:<span class="n">2100</span>}
+}</div>
+        <div style="margin-top:8px"><span class="vp vp-ok">auto_select → db-migrate</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="verdict-box" id="p2-verdict">
+    <div class="vr"><span class="vl">step1 best recall</span><span class="vv" style="color:var(--noul)">0.92</span><span class="vp vp-ok">≥ exists_threshold (0.30) → 继续 step 2</span></div>
+    <div class="vr"><span class="vl">step2 pick winner</span><span class="vv">s0 → db-migrate</span><span class="vp vp-ok">p1=0.75 ≥ threshold (0.30)</span></div>
+    <div class="vr"><span class="vl">step2 margin</span><span class="vv">0.63</span><span class="vp vp-ok">≥ margin_threshold (0.15)</span></div>
+    <div class="vr"><span class="vl">step2 winner fits</span><span class="vv" style="color:var(--fits)">0.88</span><span class="vp vp-ok">≥ fits_threshold (0.30)</span></div>
+    <div class="vr"><span class="vl">no_skill_needed p</span><span class="vv" style="color:var(--none)">0.02</span><span class="vp vp-ok">低 → 有匹配技能</span></div>
+    <div class="vr"><span class="vl">overall_verdict</span><span class="vp vp-ok">auto_select → db-migrate</span></div>
+    <div class="vr"><span class="vl">total usage</span><span class="vv">14100 tokens · ~$0.0059</span></div>
+  </div>
+</div>
+
+</div>
+
+<script>
+let playing=false;
+function sleep(ms){return new Promise(r=>setTimeout(r,ms))}
+function resetAll(){document.querySelectorAll('.stage').forEach(s=>s.classList.remove('active','done'));document.querySelectorAll('.connector').forEach(c=>c.classList.remove('active'));document.querySelectorAll('.verdict-box').forEach(v=>v.classList.remove('show'));document.querySelectorAll('.step-sep').forEach(s=>s.classList.remove('show'))}
+async function animatePipeline(cid,vid,delay){
+  const stages=document.querySelectorAll('#'+cid+' .stage');
+  const conns=document.querySelectorAll('#'+cid+' .connector');
+  for(let i=0;i<stages.length;i++){
+    if(i>0){stages[i-1].classList.remove('active');stages[i-1].classList.add('done')}
+    stages[i].classList.add('active');
+    if(i>0&&conns[i-1])conns[i-1].classList.add('active');
+    await sleep(delay);
+  }
+  await sleep(300);
+  stages.forEach(s=>{s.classList.remove('active');s.classList.add('done')});
+  if(vid){await sleep(200);document.getElementById(vid).classList.add('show')}
+}
+async function playAll(){
+  if(playing)return;playing=true;
+  const btn=document.getElementById('playBtn'),st=document.getElementById('playStatus');
+  btn.disabled=true;btn.textContent='播放中…';resetAll();
+  st.textContent='管线 1：单步 — INPUT → PICK → OUTPUT';
+  await sleep(300);await animatePipeline('p1','p1-verdict',1100);
+  await sleep(800);
+  st.textContent='管线 2 Step 1：INPUT → RECALL';
+  resetAll();await sleep(300);await animatePipeline('p2s1',null,1100);
+  await sleep(400);document.getElementById('p2-sep').classList.add('show');await sleep(600);
+  st.textContent='管线 2 Step 2：INPUT → FITS → PICK → OUTPUT';
+  await animatePipeline('p2s2','p2-verdict',1100);
+  st.textContent='✓ 完成 — 两条管线数据流演示完毕';
+  btn.disabled=false;btn.textContent='▶ 重新播放';playing=false;
+}
+resetAll();
+</script>
+</body>
+</html>

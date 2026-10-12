@@ -1,7 +1,7 @@
 """skill_search 工具测试。
 
 ① mock 测试（默认，不触网）：MockJevAPI + patched_tool_client 注入，覆盖
-   multi/choice 问题构造、verdict 分支、invalid_response、截断、分批、
+   auto 单步/两步的问题构造、verdict 分支、invalid_response、截断、分批、
    重试/不重发、参数校验、空候选。
 ② 真实 API 测试（@pytest.mark.real）：fastmcp in-process Client 真实调用。
 """
@@ -40,27 +40,64 @@ def _usage(input_tokens: int = 100) -> dict:
     }
 
 
-def _noul_body(probs: dict[str, float], input_tokens: int = 100) -> dict:
-    return {
-        "model": "jev-test",
-        "answers": {k: {"type": "noul", "noul": v} for k, v in probs.items()},
-        "usage": _usage(input_tokens),
-    }
-
-
-def _choice_body(probs: dict[str, float], exists_p: float, input_tokens: int = 100) -> dict:
-    winner = max(probs, key=lambda k: probs[k])
+def _auto_pick_body(probs: dict[str, float], input_tokens: int = 100) -> dict:
+    """auto 单步 mock 响应：pick choice (含 __no_skill_needed__)。"""
+    full_probs = dict(probs)
+    full_probs["__no_skill_needed__"] = 0.0
+    winner = max(full_probs, key=lambda k: full_probs[k])
     return {
         "model": "jev-test",
         "answers": {
             "pick": {
                 "type": "choice",
                 "choice": winner,
-                "confidence": probs[winner],
-                "probabilities": probs,
+                "confidence": full_probs[winner],
+                "probabilities": full_probs,
             },
-            "exists": {"type": "noul", "noul": exists_p},
         },
+        "usage": _usage(input_tokens),
+    }
+
+
+def _auto_pick_body_with_none(probs: dict[str, float], none_p: float, input_tokens: int = 100) -> dict:
+    """auto mock 响应：pick choice 含 __no_skill_needed__ 的概率。"""
+    full_probs = dict(probs)
+    full_probs["__no_skill_needed__"] = none_p
+    winner = max(full_probs, key=lambda k: full_probs[k])
+    return {
+        "model": "jev-test",
+        "answers": {
+            "pick": {
+                "type": "choice",
+                "choice": winner,
+                "confidence": full_probs[winner],
+                "probabilities": full_probs,
+            },
+        },
+        "usage": _usage(input_tokens),
+    }
+
+
+def _auto_rerank_body(
+    probs: dict[str, float], fits: dict[str, float], none_p: float = 0.0, input_tokens: int = 100
+) -> dict:
+    """auto step2 mock 响应：pick choice (含 __no_skill_needed__) + per-candidate fits noul。"""
+    full_probs = dict(probs)
+    full_probs["__no_skill_needed__"] = none_p
+    winner = max(full_probs, key=lambda k: full_probs[k])
+    answers = {
+        "pick": {
+            "type": "choice",
+            "choice": winner,
+            "confidence": full_probs[winner],
+            "probabilities": full_probs,
+        },
+    }
+    for k, v in fits.items():
+        answers[f"fits::{k}"] = {"type": "noul", "noul": v}
+    return {
+        "model": "jev-test",
+        "answers": answers,
         "usage": _usage(input_tokens),
     }
 
@@ -105,111 +142,346 @@ def _routed_client(route, **overrides):
     return routed, client
 
 
-# ---------- multi 模式 ----------
+# ---------- auto 模式 ----------
+# auto 单步：1 choice (pick)，criteria 内嵌 __no_skill_needed__ 选项（无 gate noul）
+# auto 两步：step1 noul 召回 → step2 choice (内嵌 __no_skill_needed__) + fits noul
+# 默认 exists_threshold=0.3, fits_threshold=0.3
 
 
-async def test_multi_happy_path(mock_api, make_client, patched_tool_client):
-    mock_api.push(200, _noul_body({"s0": 0.9, "s1": 0.5, "s2": 0.1}))
+async def test_auto_single_step_happy_path(mock_api, make_client, patched_tool_client):
+    """auto 单步：skills ≤ switch_threshold → 1 choice (pick, 含 __no_skill_needed__)。"""
+    mock_api.push(200, _auto_pick_body({"s0": 0.70, "s1": 0.20, "s2": 0.10}))
+    patched_tool_client(make_client(), module=MODULE)
+
+    data = await _call(SKILLS_3)  # 3 skills ≤ 50
+
+    assert data["mode"] == "auto"
+    assert data["steps"] == 1
+    assert data["selected"][0]["name"] == "ppt-architect"
+    assert data["detail"]["overall_verdict"] == "auto_select"
+    assert data["none_probability"] == pytest.approx(0.0, abs=0.001)
+    assert data["batches"] == 1
+
+    # 问题构造：只有 pick choice（无 gate），criteria 含 __no_skill_needed__
+    assert len(mock_api.requests) == 1
+    sent = json.loads(mock_api.requests[0].content)
+    assert set(sent["questions"]) == {"pick"}
+    assert sent["questions"]["pick"]["type"] == "choice"
+    assert "__no_skill_needed__" in sent["questions"]["pick"]["criteria"]
+
+
+async def test_auto_single_step_no_skill_wins(mock_api, make_client, patched_tool_client):
+    """__no_skill_needed__ 胜出 → none_relevant，全部 skip。"""
+    mock_api.push(200, _auto_pick_body_with_none({"s0": 0.15, "s1": 0.10, "s2": 0.05}, none_p=0.70))
     patched_tool_client(make_client(), module=MODULE)
 
     data = await _call(SKILLS_3)
 
-    assert data["mode"] == "multi"
-    assert [s["name"] for s in data["selected"]] == ["ppt-architect", "pdf"]
-    assert [s["probability"] for s in data["selected"]] == [0.9, 0.5]
-    assert all(s["verdict"] == "select" and s["truncated"] is False for s in data["selected"])
-    assert [s["name"] for s in data["skipped"]] == ["db-migrate"]
-    assert data["invalid"] == []
-    # none_probability = (1-0.9)(1-0.5)(1-0.1)
-    assert data["none_probability"] == pytest.approx(0.045)
+    assert data["selected"] == []
+    assert data["detail"]["overall_verdict"] == "none_relevant"
+    assert data["none_probability"] == pytest.approx(0.70, abs=0.001)
+    assert len(data["skipped"]) == 3
+    assert all(s["reason"] == "none_relevant" for s in data["skipped"])
+
+
+async def test_auto_single_step_low_margin(mock_api, make_client, patched_tool_client):
+    """margin 不足 → 冠亚军 review。"""
+    mock_api.push(200, _auto_pick_body_with_none({"s0": 0.45, "s1": 0.40, "s2": 0.12}, none_p=0.03))
+    patched_tool_client(make_client(), module=MODULE)
+
+    data = await _call(SKILLS_3)
+
+    assert data["selected"] == []
+    assert data["detail"]["overall_verdict"] == "low_margin"
+    assert [r["name"] for r in data["reviewed"]] == ["ppt-architect", "pdf"]
+    assert all(r["reason"] == "low_margin" for r in data["reviewed"])
+
+
+async def test_auto_single_step_invalid_pick_fails_whole(mock_api, make_client, patched_tool_client):
+    """单步 auto: pick 非 argmax → 全部 invalid。"""
+    body = _auto_pick_body({"s0": 0.7, "s1": 0.2, "s2": 0.1})
+    body["answers"]["pick"]["choice"] = "s1"  # 非 argmax
+    mock_api.push(200, body)
+    patched_tool_client(make_client(), module=MODULE)
+
+    data = await _call(SKILLS_3)
+
+    assert len(data["invalid"]) == 3
+    assert all(i["verdict"] == "invalid_response" for i in data["invalid"])
+    assert data["none_probability"] is None
+
+
+async def test_auto_two_step_recall_rerank(patched_tool_client):
+    """skills > switch_threshold → 两步：step1 noul 召回 → step2 choice (含 __no_skill_needed__) + fits。"""
+    # 用 switch_threshold=2 触发两步，3 个技能 > 2
+    def route(body):
+        questions = body["questions"]
+        if "pick" in questions:
+            # Step 2: choice (含 __no_skill_needed__) + fits
+            pick_probs = {}
+            fits_answers = {}
+            for k in questions["pick"]["criteria"]:
+                if k == "__no_skill_needed__":
+                    pick_probs[k] = 0.0
+                else:
+                    pick_probs[k] = {"s0": 0.7, "s1": 0.2, "s2": 0.1}.get(k, 0.1)
+                if k != "__no_skill_needed__":
+                    fits_answers[f"fits::{k}"] = {
+                        "type": "noul",
+                        "noul": {"s0": 0.8, "s1": 0.3, "s2": 0.1}.get(k, 0.1),
+                    }
+            winner = max(pick_probs, key=lambda k: pick_probs[k])
+            return 200, {
+                "model": "jev-test",
+                "answers": {
+                    "pick": {
+                        "type": "choice",
+                        "choice": winner,
+                        "confidence": pick_probs[winner],
+                        "probabilities": pick_probs,
+                    },
+                    **fits_answers,
+                },
+                "usage": _usage(50),
+            }
+        else:
+            # Step 1: noul per skill（无 gate）
+            answers = {
+                name: {"type": "noul", "noul": {"s0": 0.9, "s1": 0.6, "s2": 0.2}[name]}
+                for name in questions
+                if name.startswith("s")
+            }
+            return 200, {"model": "jev-test", "answers": answers, "usage": _usage(100)}
+
+    routed, client = _routed_client(route)
+    patched_tool_client(client, module=MODULE)
+
+    data = await _call(SKILLS_3, switch_threshold=2)
+
+    assert data["mode"] == "auto"
+    assert data["steps"] == 2
+    assert data["selected"][0]["name"] == "ppt-architect"
+    assert data["detail"]["overall_verdict"] == "auto_select"
+    assert data["detail"]["step1"]["candidates"] == ["s0", "s1", "s2"]
+    assert "s0" in data["detail"]["step2"]["fits"]
+    # 2 步请求
+    assert data["batches"] >= 2
+    # usage = step1 + step2
+    assert data["usage"]["input_tokens"] >= 150
+
+
+async def test_auto_two_step_recall_low_exit(patched_tool_client):
+    """step1 所有召回概率 < exists_threshold → 跳过 step2。"""
+    def route(body):
+        questions = body["questions"]
+        if "pick" in questions:
+            assert False, "step2 should not be reached"
+        # 所有技能召回概率很低
+        answers = {
+            name: {"type": "noul", "noul": {"s0": 0.15, "s1": 0.10, "s2": 0.05}[name]}
+            for name in questions
+            if name.startswith("s")
+        }
+        return 200, {"model": "jev-test", "answers": answers, "usage": _usage(100)}
+
+    routed, client = _routed_client(route)
+    patched_tool_client(client, module=MODULE)
+
+    data = await _call(SKILLS_3, switch_threshold=2)
+
+    assert data["selected"] == []
+    assert data["detail"]["overall_verdict"] == "none_relevant"
+    assert data["steps"] == 1  # 只有 step1 执行
+    # 没有发起 step2 请求
+    assert all("pick" not in json.loads(r.content)["questions"] for r in routed.requests)
+
+
+async def test_auto_two_step_none_fit(patched_tool_client):
+    """step2 all fits < fits_threshold → none_fit。"""
+    def route(body):
+        questions = body["questions"]
+        if "pick" in questions:
+            pick_probs = {}
+            fits_answers = {}
+            for k in questions["pick"]["criteria"]:
+                if k == "__no_skill_needed__":
+                    pick_probs[k] = 0.0
+                else:
+                    pick_probs[k] = {"s0": 0.7, "s1": 0.2, "s2": 0.1}.get(k, 0.1)
+                if k != "__no_skill_needed__":
+                    # 全部 fits 很低
+                    fits_answers[f"fits::{k}"] = {"type": "noul", "noul": 0.1}
+            winner = max(pick_probs, key=lambda k: pick_probs[k])
+            return 200, {
+                "model": "jev-test",
+                "answers": {
+                    "pick": {
+                        "type": "choice",
+                        "choice": winner,
+                        "confidence": pick_probs[winner],
+                        "probabilities": pick_probs,
+                    },
+                    **fits_answers,
+                },
+                "usage": _usage(50),
+            }
+        else:
+            answers = {
+                name: {"type": "noul", "noul": {"s0": 0.9, "s1": 0.6, "s2": 0.2}[name]}
+                for name in questions
+                if name.startswith("s")
+            }
+            return 200, {"model": "jev-test", "answers": answers, "usage": _usage(100)}
+
+    routed, client = _routed_client(route)
+    patched_tool_client(client, module=MODULE)
+
+    data = await _call(SKILLS_3, switch_threshold=2)
+
+    assert data["selected"] == []
+    assert data["detail"]["overall_verdict"] == "none_fit"
+
+
+async def test_auto_two_step_low_margin(patched_tool_client):
+    """step2 margin < margin_threshold → 冠亚军 review。"""
+    def route(body):
+        questions = body["questions"]
+        if "pick" in questions:
+            pick_probs = {}
+            fits_answers = {}
+            for k in questions["pick"]["criteria"]:
+                if k == "__no_skill_needed__":
+                    pick_probs[k] = 0.0
+                else:
+                    pick_probs[k] = {"s0": 0.45, "s1": 0.4, "s2": 0.15}.get(k, 0.1)
+                if k != "__no_skill_needed__":
+                    fits_answers[f"fits::{k}"] = {"type": "noul", "noul": 0.8}
+            winner = max(pick_probs, key=lambda k: pick_probs[k])
+            return 200, {
+                "model": "jev-test",
+                "answers": {
+                    "pick": {
+                        "type": "choice",
+                        "choice": winner,
+                        "confidence": pick_probs[winner],
+                        "probabilities": pick_probs,
+                    },
+                    **fits_answers,
+                },
+                "usage": _usage(50),
+            }
+        else:
+            answers = {
+                name: {"type": "noul", "noul": {"s0": 0.9, "s1": 0.6, "s2": 0.2}[name]}
+                for name in questions
+                if name.startswith("s")
+            }
+            return 200, {"model": "jev-test", "answers": answers, "usage": _usage(100)}
+
+    routed, client = _routed_client(route)
+    patched_tool_client(client, module=MODULE)
+
+    data = await _call(SKILLS_3, switch_threshold=2)
+
+    assert data["selected"] == []
+    assert data["detail"]["overall_verdict"] == "low_margin"
+    assert [r["name"] for r in data["reviewed"]] == ["ppt-architect", "pdf"]
+    assert all(r["reason"] == "low_margin" for r in data["reviewed"])
+
+
+async def test_auto_two_step_batch_failure_isolated(patched_tool_client):
+    """step1 首批失败 → 该批技能 invalid，其余有效技能继续到 step2。"""
+    def route(body):
+        questions = body["questions"]
+        if "pick" in questions:
+            pick_probs = {}
+            fits_answers = {}
+            for k in questions["pick"]["criteria"]:
+                if k == "__no_skill_needed__":
+                    pick_probs[k] = 0.0
+                else:
+                    pick_probs[k] = {"s1": 0.7, "s2": 0.2}.get(k, 0.1)
+                if k != "__no_skill_needed__":
+                    fits_answers[f"fits::{k}"] = {"type": "noul", "noul": 0.8}
+            winner = max(pick_probs, key=lambda k: pick_probs[k])
+            return 200, {
+                "model": "jev-test",
+                "answers": {
+                    "pick": {
+                        "type": "choice",
+                        "choice": winner,
+                        "confidence": pick_probs[winner],
+                        "probabilities": pick_probs,
+                    },
+                    **fits_answers,
+                },
+                "usage": _usage(50),
+            }
+        # 首批（s0）失败
+        if "s0" in questions:
+            return 502, {"error": "upstream"}
+        # 其他批正常
+        answers = {
+            name: {"type": "noul", "noul": 0.9}
+            for name in questions
+            if name.startswith("s")
+        }
+        return 200, {"model": "jev-test", "answers": answers, "usage": _usage(100)}
+
+    routed, client = _routed_client(route, max_retries=1)
+    patched_tool_client(client, module=MODULE)
+
+    data = await _call(SKILLS_3, switch_threshold=2, max_skills_per_batch=1)
+
+    # s0 所在批失败 → invalid；s1/s2 有效，best_recall=0.9 ≥ exists_threshold → 继续 step2
+    assert data["steps"] == 2
+    assert any(i["name"] == "ppt-architect" for i in data["invalid"])
+    assert data["detail"]["overall_verdict"] == "auto_select"
+
+
+async def test_auto_switch_threshold_boundary(mock_api, make_client, patched_tool_client):
+    """len(skills) == switch_threshold → 单步。"""
+    mock_api.push(200, _auto_pick_body({"s0": 0.9, "s1": 0.1, "s2": 0.1}))
+    patched_tool_client(make_client(), module=MODULE)
+
+    data = await _call(SKILLS_3, switch_threshold=3)  # 3 skills == 3
+
+    assert data["mode"] == "auto"
+    assert data["steps"] == 1  # 单步
     assert data["batches"] == 1
-    assert data["usage"]["input_tokens"] == 100
-    assert data["thresholds"]["threshold"] == 0.3
-    assert isinstance(data["latency_ms"], int)
-
-    # 请求构造：单批、state 共享、每技能一个位置 key noul（原则 8/15）
-    assert len(mock_api.requests) == 1
-    sent = json.loads(mock_api.requests[0].content)
-    assert sent["state"]["query"] == "帮我做一份 PPT"
-    assert [c["key"] for c in sent["state"]["catalog"]] == ["s0", "s1", "s2"]
-    assert sent["state"]["catalog"][0]["name"] == "ppt-architect"
-    assert set(sent["questions"]) == {"s0", "s1", "s2"}
-    assert all(q["type"] == "noul" for q in sent["questions"].values())
-    assert '"ppt-architect"' in sent["questions"]["s0"]["instructions"]  # name 内联进问题
 
 
-async def test_multi_truncated_never_auto_select(mock_api, make_client, patched_tool_client):
-    long_desc = "x" * 100
-    skills = [
-        {"name": "long-skill", "description": long_desc},
-        {"name": "short-skill", "description": "short"},
-    ]
-    mock_api.push(200, _noul_body({"s0": 0.9, "s1": 0.9}))
+async def test_auto_single_step_truncated_demoted_to_review(mock_api, make_client, patched_tool_client):
+    """description 截断 → review，不自动 select。"""
+    skills = [{"name": "long", "description": "x" * 100}] + SKILLS_3[1:]
+    mock_api.push(200, _auto_pick_body({"s0": 0.8, "s1": 0.15, "s2": 0.05}))
     patched_tool_client(make_client(), module=MODULE)
 
     data = await _call(skills, description_max_chars=10)
 
-    sent = json.loads(mock_api.requests[0].content)
-    assert len(sent["state"]["catalog"][0]["description"]) == 10  # 请求中已截断
-    # 概率达标但 description 被截断 → review，不自动 select（原则 12）
-    assert [s["name"] for s in data["selected"]] == ["short-skill"]
-    assert data["reviewed"][0]["name"] == "long-skill"
-    assert data["reviewed"][0]["reason"] == "truncated"
-    assert data["reviewed"][0]["truncated"] is True
-
-
-async def test_multi_over_max_results_goes_to_review(mock_api, make_client, patched_tool_client):
-    mock_api.push(200, _noul_body({"s0": 0.9, "s1": 0.8, "s2": 0.7}))
-    patched_tool_client(make_client(), module=MODULE)
-
-    data = await _call(SKILLS_3, max_results=2)
-
-    assert [s["name"] for s in data["selected"]] == ["ppt-architect", "pdf"]
-    assert len(data["reviewed"]) == 1
-    assert data["reviewed"][0]["name"] == "db-migrate"
-    assert data["reviewed"][0]["reason"] == "over_max_results"
-
-
-async def test_multi_invalid_answer_isolated(mock_api, make_client, patched_tool_client):
-    body = _noul_body({"s0": 0.9, "s2": 0.1})
-    body["answers"]["s1"] = {"type": "noul", "noul": 1.5}  # 概率越界
-    mock_api.push(200, body)
-    patched_tool_client(make_client(), module=MODULE)
-
-    data = await _call(SKILLS_3)
-
-    # 单个坏答案只影响该项，不炸掉同批其他技能（原则 13）
-    assert [s["name"] for s in data["selected"]] == ["ppt-architect"]
-    assert [s["name"] for s in data["skipped"]] == ["db-migrate"]
-    assert len(data["invalid"]) == 1
-    assert data["invalid"][0]["name"] == "pdf"
-    assert data["invalid"][0]["verdict"] == "invalid_response"
-    # none_probability 仅对有效答案计算：(1-0.9)(1-0.1)
-    assert data["none_probability"] == pytest.approx(0.09)
-
-
-async def test_multi_missing_answer_and_wrong_type(mock_api, make_client, patched_tool_client):
-    body = _noul_body({"s2": 0.1})  # s0 缺失
-    body["answers"]["s1"] = {"type": "choice", "choice": "a", "probabilities": {"a": 1.0}}
-    mock_api.push(200, body)
-    patched_tool_client(make_client(), module=MODULE)
-
-    data = await _call(SKILLS_3)
-
-    reasons = {i["name"]: i["reason"] for i in data["invalid"]}
-    assert reasons == {"ppt-architect": "missing answer", "pdf": "answer type is not noul"}
     assert data["selected"] == []
-    assert [s["name"] for s in data["skipped"]] == ["db-migrate"]
+    assert data["reviewed"][0]["name"] == "long"
+    assert data["reviewed"][0]["reason"] == "truncated"
 
 
-async def test_multi_all_invalid_none_probability_null(mock_api, make_client, patched_tool_client):
-    mock_api.push(200, {"model": "jev-test", "answers": {}, "usage": _usage()})
+async def test_auto_single_step_over_255_skills_rejected(make_client, patched_tool_client):
+    """auto 单步超过 MAX_CHOICE_OPTIONS → 报错。"""
+    from fastmcp import Client
+    from fastmcp.exceptions import ToolError as ClientToolError
+
+    from jev_harness_tool.server import create_server
+
     patched_tool_client(make_client(), module=MODULE)
+    skills = [{"name": f"skill-{i}", "description": "d"} for i in range(256)]
 
-    data = await _call(SKILLS_3[:1])
+    async with Client(create_server()) as c:
+        with pytest.raises(ClientToolError, match="255"):
+            await c.call_tool(
+                "skill_search", {"query": "q", "skills": skills, "switch_threshold": 256}
+            )
 
-    assert len(data["invalid"]) == 1
-    assert data["none_probability"] is None
+
+# ---------- 空候选 & 重试/错误 ----------
 
 
 async def test_empty_skills_no_request(mock_api, make_client, patched_tool_client):
@@ -224,57 +496,8 @@ async def test_empty_skills_no_request(mock_api, make_client, patched_tool_clien
     assert len(mock_api.requests) == 0  # 不发请求
 
 
-async def test_multi_batching_merge_and_usage_sum(patched_tool_client, monkeypatch):
-    monkeypatch.setattr(tokens_mod, "TOTAL_TOKEN_BUDGET", 300)  # 强制分批
-
-    def route(body):
-        answers = {name: {"type": "noul", "noul": {"s0": 0.9, "s1": 0.6, "s2": 0.2}[name]}
-                   for name in body["questions"]}
-        return 200, {"model": "jev-test", "answers": answers, "usage": _usage(10)}
-
-    routed, client = _routed_client(route)
-    patched_tool_client(client, module=MODULE)
-
-    data = await _call(SKILLS_3)
-
-    assert data["batches"] == 3  # 每批 1 个技能
-    assert len(routed.requests) == 3
-    # 跨批合并后按概率全局排序
-    assert [s["name"] for s in data["selected"]] == ["ppt-architect", "pdf"]
-    assert [s["name"] for s in data["skipped"]] == ["db-migrate"]
-    # 位置 key 全局连续，不随分批重置
-    keys = sorted(
-        c["key"] for r in routed.requests for c in json.loads(r.content)["state"]["catalog"]
-    )
-    assert keys == ["s0", "s1", "s2"]
-    # 每批 state 重发（含 query）
-    assert all(json.loads(r.content)["state"]["query"] for r in routed.requests)
-    # usage 各批求和
-    assert data["usage"]["input_tokens"] == 30
-
-
-async def test_multi_batch_failure_isolated(patched_tool_client):
-    def route(body):
-        if "s0" in body["questions"]:
-            return 502, {"error": "upstream"}
-        answers = {name: {"type": "noul", "noul": 0.9} for name in body["questions"]}
-        return 200, {"model": "jev-test", "answers": answers, "usage": _usage(10)}
-
-    routed, client = _routed_client(route, max_retries=1)
-    patched_tool_client(client, module=MODULE)
-
-    # 用 max_skills_per_batch 强制分两批：s0 一批、其余一批
-    data = await _call(SKILLS_3, max_skills_per_batch=1)
-
-    assert data["batches"] == 3
-    # s0 所在批失败 → invalid_response（upstream）；其他批正常
-    assert [i["name"] for i in data["invalid"]] == ["ppt-architect"]
-    assert data["invalid"][0]["reason"] == "upstream_error"
-    assert {s["name"] for s in data["selected"]} == {"pdf", "db-migrate"}
-
-
 async def test_retry_502_then_success(mock_api, make_client, patched_tool_client):
-    mock_api.push(502, {"error": "upstream"}).push(200, _noul_body({"s0": 0.9}))
+    mock_api.push(502, {"error": "upstream"}).push(200, _auto_pick_body({"s0": 0.9}))
     patched_tool_client(make_client(max_retries=3), module=MODULE)
 
     data = await _call(SKILLS_3[:1])
@@ -310,113 +533,6 @@ async def test_401_surfaces_tool_error(mock_api, make_client, patched_tool_clien
     assert len(mock_api.requests) == 1  # 零重试
 
 
-# ---------- choice 模式 ----------
-
-
-async def test_choice_happy_path(mock_api, make_client, patched_tool_client):
-    mock_api.push(200, _choice_body({"s0": 0.7, "s1": 0.2, "s2": 0.1}, exists_p=0.9))
-    patched_tool_client(make_client(), module=MODULE)
-
-    data = await _call(SKILLS_3, mode="choice")
-
-    assert [s["name"] for s in data["selected"]] == ["ppt-architect"]
-    assert data["selected"][0]["probability"] == pytest.approx(0.7)
-    assert data["detail"]["overall_verdict"] == "auto_select"
-    assert data["detail"]["exists_probability"] == pytest.approx(0.9)
-    assert data["none_probability"] == pytest.approx(0.1)
-    assert data["batches"] == 1
-
-    # 同一 /decide 调用内并行 pick + exists（原则 3/8）
-    assert len(mock_api.requests) == 1
-    sent = json.loads(mock_api.requests[0].content)
-    assert set(sent["questions"]) == {"pick", "exists"}
-    assert sent["questions"]["pick"]["type"] == "choice"
-    assert list(sent["questions"]["pick"]["criteria"]) == ["s0", "s1", "s2"]
-    assert sent["questions"]["exists"]["type"] == "noul"
-
-
-async def test_choice_exists_gate_none_relevant(mock_api, make_client, patched_tool_client):
-    mock_api.push(200, _choice_body({"s0": 0.7, "s1": 0.2, "s2": 0.1}, exists_p=0.1))
-    patched_tool_client(make_client(), module=MODULE)
-
-    data = await _call(SKILLS_3, mode="choice")
-
-    # 存在性门控：choice 分布作废，不产出 select（原则 3）
-    assert data["selected"] == []
-    assert data["detail"]["overall_verdict"] == "none_relevant"
-    assert data["none_probability"] == pytest.approx(0.9)
-    assert len(data["skipped"]) == 3
-    assert all(s["reason"] == "none_relevant" for s in data["skipped"])
-
-
-async def test_choice_low_margin_reviews_top_two(mock_api, make_client, patched_tool_client):
-    mock_api.push(200, _choice_body({"s0": 0.45, "s1": 0.4, "s2": 0.15}, exists_p=0.9))
-    patched_tool_client(make_client(), module=MODULE)
-
-    data = await _call(SKILLS_3, mode="choice")
-
-    # margin 0.05 < 0.15：冠亚军均 review，绝不自动二选一（原则 5）
-    assert data["selected"] == []
-    assert data["detail"]["overall_verdict"] == "low_margin"
-    assert [r["name"] for r in data["reviewed"]] == ["ppt-architect", "pdf"]
-    assert all(r["reason"] == "low_margin" for r in data["reviewed"])
-    assert [s["name"] for s in data["skipped"]] == ["db-migrate"]
-
-
-async def test_choice_below_threshold_reviews_winner(mock_api, make_client, patched_tool_client):
-    mock_api.push(200, _choice_body({"s0": 0.25, "s1": 0.2, "s2": 0.1}, exists_p=0.9))
-    patched_tool_client(make_client(), module=MODULE)
-
-    data = await _call(SKILLS_3, mode="choice")
-
-    assert data["selected"] == []
-    assert data["detail"]["overall_verdict"] == "below_threshold"
-    assert data["reviewed"][0]["name"] == "ppt-architect"
-    assert data["reviewed"][0]["reason"] == "below_threshold"
-
-
-async def test_choice_truncated_winner_demoted_to_review(mock_api, make_client, patched_tool_client):
-    skills = [{"name": "long", "description": "x" * 100}] + SKILLS_3[1:]
-    mock_api.push(200, _choice_body({"s0": 0.8, "s1": 0.15, "s2": 0.05}, exists_p=0.9))
-    patched_tool_client(make_client(), module=MODULE)
-
-    data = await _call(skills, mode="choice", description_max_chars=10)
-
-    assert data["selected"] == []
-    assert data["reviewed"][0]["name"] == "long"
-    assert data["reviewed"][0]["reason"] == "truncated"
-
-
-async def test_choice_invalid_pick_fails_whole_result(mock_api, make_client, patched_tool_client):
-    body = _choice_body({"s0": 0.7, "s1": 0.2, "s2": 0.1}, exists_p=0.9)
-    body["answers"]["pick"]["choice"] = "s1"  # 非 argmax
-    mock_api.push(200, body)
-    patched_tool_client(make_client(), module=MODULE)
-
-    data = await _call(SKILLS_3, mode="choice")
-
-    # choice 是单点决策，无法逐项降级 → 全部 invalid
-    assert len(data["invalid"]) == 3
-    assert all(i["verdict"] == "invalid_response" for i in data["invalid"])
-    assert data["selected"] == [] and data["none_probability"] is None
-
-
-async def test_choice_over_255_skills_rejected(make_client, patched_tool_client):
-    from fastmcp import Client
-    from fastmcp.exceptions import ToolError as ClientToolError
-
-    from jev_harness_tool.server import create_server
-
-    patched_tool_client(make_client(), module=MODULE)
-    skills = [{"name": f"skill-{i}", "description": "d"} for i in range(256)]
-
-    async with Client(create_server()) as c:
-        with pytest.raises(ClientToolError, match="255"):
-            await c.call_tool(
-                "skill_search", {"query": "q", "skills": skills, "mode": "choice"}
-            )
-
-
 # ---------- 参数校验 ----------
 
 
@@ -432,10 +548,6 @@ async def test_invalid_threshold_rejected(make_client, patched_tool_client):
         with pytest.raises(ClientToolError, match="threshold"):
             await c.call_tool(
                 "skill_search", {"query": "q", "skills": SKILLS_3, "threshold": 1.5}
-            )
-        with pytest.raises(ClientToolError, match="mode"):
-            await c.call_tool(
-                "skill_search", {"query": "q", "skills": SKILLS_3, "mode": "bogus"}
             )
         with pytest.raises(ClientToolError, match="query"):
             await c.call_tool("skill_search", {"query": "  ", "skills": SKILLS_3})
@@ -467,33 +579,16 @@ CLEARLY_IRRELEVANT = {
 
 
 @pytest.mark.real
-async def test_real_skill_search_multi_ppt():
+async def test_real_skill_search_auto_ppt():
     if not os.environ.get("JV_API_KEY"):
         pytest.skip("JV_API_KEY not set")
 
     data = await _call(REAL_SKILLS, query=REAL_QUERY)
 
-    selected_names = {s["name"] for s in data["selected"]}
-    assert "ppt-architect" in selected_names
-    winner = next(s for s in data["selected"] if s["name"] == "ppt-architect")
-    assert winner["probability"] >= 0.3
-    assert CLEARLY_IRRELEVANT.isdisjoint(selected_names)
     assert data["invalid"] == []
-    assert data["batches"] >= 1
-    assert data["usage"]["input_tokens"] > 0
+    assert data["mode"] == "auto"
+    assert data["steps"] == 1  # 10 skills ≤ 50
     assert data["none_probability"] is not None
-
-
-@pytest.mark.real
-async def test_real_skill_search_choice_ppt():
-    if not os.environ.get("JV_API_KEY"):
-        pytest.skip("JV_API_KEY not set")
-
-    data = await _call(REAL_SKILLS, query=REAL_QUERY, mode="choice")
-
-    assert data["invalid"] == []
-    assert data["detail"]["exists_probability"] >= 0.3  # 存在性门控应放行
-    # 冠军应在两个 PPT 技能中产生（select 或 low_margin review 均可接受）
     contenders = {s["name"] for s in data["selected"] + data["reviewed"]}
     assert contenders & {"ppt-architect", "html-ppt"}
     assert data["usage"]["input_tokens"] > 0

@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>instructions 措辞 A/B 测试 — 真实 API 对比实验</title>
+<style>
+:root {
+  --bg: #0a0c12; --surface: #12151f; --surface2: #1a1e2c; --surface3: #232838;
+  --border: #2a2f3d; --text: #d4d9e8; --text-dim: #6b7390; --text-bright: #f0f2f8;
+  --accent: #5b8def; --choice: #818cf8; --none: #fb923c;
+  --red: #f87171; --green: #4ade80; --amber: #fbbf24;
+  --mono: 'SF Mono','Fira Code','JetBrains Mono',Consolas,monospace;
+  --sans: -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--bg);color:var(--text);font-family:var(--sans);line-height:1.6;overflow-x:hidden}
+.container{max-width:1100px;margin:0 auto;padding:32px 20px 64px}
+.header{border-bottom:1px solid var(--border);padding-bottom:20px;margin-bottom:32px}
+.header h1{font-size:24px;color:var(--text-bright);font-weight:700;margin-bottom:8px}
+.header p{color:var(--text-dim);font-size:13px;line-height:1.7}
+
+.summary-bar{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:28px}
+.stat-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px;text-align:center}
+.stat-num{font-size:32px;font-weight:800;font-family:var(--mono)}
+.stat-label{font-size:11px;color:var(--text-dim);font-family:var(--mono);margin-top:4px;text-transform:uppercase;letter-spacing:.5px}
+.stat-old .stat-num{color:var(--red)}
+.stat-new .stat-num{color:var(--green)}
+.stat-delta .stat-num{color:var(--accent)}
+
+.scenario{background:var(--surface);border:1px solid var(--border);border-radius:14px;overflow:hidden;margin-bottom:16px}
+.scenario-head{background:var(--surface2);padding:14px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.scenario-head h3{font-size:15px;color:var(--text-bright);font-weight:600}
+.scenario-tag{font-size:10px;font-family:var(--mono);padding:2px 8px;border-radius:999px}
+.tag-control{background:rgba(91,141,239,.12);color:#93b4f7;border:1px solid rgba(91,141,239,.3)}
+.tag-blind{background:rgba(251,146,60,.12);color:#fdba74;border:1px solid rgba(251,146,60,.3)}
+.scenario-body{padding:18px 20px}
+.query-box{background:#06080d;border:1px solid var(--border);border-radius:8px;padding:10px 14px;font-family:var(--mono);font-size:12px;margin-bottom:14px;color:var(--text-bright)}
+.query-box .removed{color:var(--red);font-size:11px}
+
+.compare{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.compare-col{background:var(--surface2);border:1px solid var(--border);border-radius:10px;overflow:hidden}
+.compare-head{padding:10px 14px;border-bottom:1px solid var(--border)}
+.compare-head h4{font-size:13px;color:var(--text-bright);font-weight:600}
+.compare-content{padding:14px}
+
+.bars{margin:6px 0}
+.bar-row{display:flex;align-items:center;gap:8px;margin-bottom:4px}
+.bar-lbl{font-family:var(--mono);font-size:10px;color:var(--text-dim);min-width:170px;text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bar-lbl.winner{color:var(--text-bright);font-weight:700}
+.bar-lbl.none{color:var(--none)}
+.bar-trk{flex:1;height:20px;background:var(--surface3);border-radius:4px;overflow:hidden;position:relative}
+.bar-fill{height:100%;border-radius:4px;display:flex;align-items:center;padding-left:6px;font-family:var(--mono);font-size:9px;color:rgba(255,255,255,.9);font-weight:700;white-space:nowrap;overflow:hidden}
+.f-choice{background:linear-gradient(90deg,#6366f1,#818cf8)}
+.f-none{background:linear-gradient(90deg,#ea580c,#fb923c)}
+
+.verdict{margin-top:8px;padding:8px 12px;border-radius:8px;font-size:11px;font-family:var(--mono);line-height:1.6}
+.v-correct{background:rgba(74,222,128,.06);color:#86efac;border:1px solid rgba(74,222,128,.2)}
+.v-wrong{background:rgba(248,113,113,.06);color:#fca5a5;border:1px solid rgba(248,113,113,.2)}
+.delta-up{color:var(--green)}
+.delta-down{color:var(--red)}
+
+.analysis{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:20px;margin-top:28px}
+.analysis h2{font-size:18px;color:var(--text-bright);font-weight:700;margin-bottom:12px}
+.analysis p{color:var(--text-dim);font-size:13px;line-height:1.8;margin-bottom:8px}
+.analysis b{color:var(--text-bright)}
+.analysis .hl{color:var(--accent)}
+.analysis .warn{color:var(--red)}
+
+@media(max-width:860px){.compare{grid-template-columns:1fr}.bar-lbl{min-width:110px;font-size:9px}.summary-bar{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="container">
+
+<div class="header">
+  <h1>instructions 措辞 A/B 测试 — 真实 API 对比实验</h1>
+  <p>
+    核心假设：<b style="color:var(--text-bright)">问题不在机制，而在 instructions 措辞</b>。旧版说"best matches"和"scope match"，但没有说明技能的本质——技能是<b>完成任务的指导说明/流程规范/最佳实践</b>，不是语义相关的工具。jev 看到"MCP"+"检查"关键词就选了 mcp-builder，因为它认为"scope 匹配"。<br><br>
+    <b style="color:var(--red)">旧版</b>："Pick the single option that best matches the query. Judge by scope match, not keyword overlap."<br>
+    <b style="color:var(--green)">新版</b>："A skill is a set of instructions, guidelines, or best practices for accomplishing a specific type of task... Pick the single option that the assistant would actually need to load and follow to answer, solve, or complete the user's request."<br><br>
+    <b>15 个真实技能 · 6 个场景 · jev-latest · 每场景调用 2 次（旧版+新版）</b>
+  </p>
+</div>
+
+<div class="summary-bar">
+  <div class="stat-card stat-old"><div class="stat-num">2/6</div><div class="stat-label">旧版准确率</div></div>
+  <div class="stat-card stat-new"><div class="stat-num">6/6</div><div class="stat-label">新版准确率</div></div>
+  <div class="stat-card stat-delta"><div class="stat-num">+4</div><div class="stat-label">改进场景数</div></div>
+</div>
+
+<!-- ===== SCENARIO 1 ===== -->
+<div class="scenario">
+  <div class="scenario-head">
+    <h3>场景 1：明确命中（控制组）</h3>
+    <span class="scenario-tag tag-control">控制组</span>
+  </div>
+  <div class="scenario-body">
+    <div class="query-box">query: "帮我做一份产品发布会的 PPT 演示文稿"<br><span class="removed">roster: 15 skills · 未移除 · 预期: html-pptx</span></div>
+    <div class="compare">
+      <div class="compare-col">
+        <div class="compare-head"><h4 style="color:var(--red)">旧版 ✓</h4></div>
+        <div class="compare-content">
+          <div class="bars">
+            <div class="bar-row"><span class="bar-lbl winner">html-pptx ← winner</span><div class="bar-trk"><div class="bar-fill f-choice" style="width:100%">1.000</div></div></div>
+            <div class="bar-row"><span class="bar-lbl none">no_skill_needed</span><div class="bar-trk"><div class="bar-fill f-none" style="width:1%">0.000</div></div></div>
+          </div>
+          <div class="verdict v-correct">✓ html-pptx 1.000 → 正确</div>
+        </div>
+      </div>
+      <div class="compare-col">
+        <div class="compare-head"><h4 style="color:var(--green)">新版 ✓</h4></div>
+        <div class="compare-content">
+          <div class="bars">
+            <div class="bar-row"><span class="bar-lbl winner">html-pptx ← winner</span><div class="bar-trk"><div class="bar-fill f-choice" style="width:99%">0.990</div></div></div>
+            <div class="bar-row"><span class="bar-lbl none">no_skill_needed</span><div class="bar-trk"><div class="bar-fill f-none" style="width:1%">0.010</div></div></div>
+          </div>
+          <div class="verdict v-correct">✓ html-pptx 0.990 → 正确</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== SCENARIO 2 ===== -->
+<div class="scenario">
+  <div class="scenario-head">
+    <h3>场景 2：移除"技能创建"后询问创建技能</h3>
+    <span class="scenario-tag tag-blind">roster 盲区</span>
+  </div>
+  <div class="scenario-body">
+    <div class="query-box">query: "帮我创建一个新的技能来处理代码格式化"<br><span class="removed">移除: 技能创建 · 预期: no_skill_needed</span></div>
+    <div class="compare">
+      <div class="compare-col">
+        <div class="compare-head"><h4 style="color:var(--green)">旧版 ✓</h4></div>
+        <div class="compare-content">
+          <div class="bars">
+            <div class="bar-row"><span class="bar-lbl none winner">no_skill_needed ← winner</span><div class="bar-trk"><div class="bar-fill f-none" style="width:64%">0.640</div></div></div>
+            <div class="bar-row"><span class="bar-lbl">mcp-builder</span><div class="bar-trk"><div class="bar-fill f-choice" style="width:15%">0.150</div></div></div>
+            <div class="bar-row"><span class="bar-lbl">update-config</span><div class="bar-trk"><div class="bar-fill f-choice" style="width:13%">0.130</div></div></div>
+          </div>
+          <div class="verdict v-correct">✓ no_skill_needed 0.640 → 正确（但 margin 不足）</div>
+        </div>
+      </div>
+      <div class="compare-col">
+        <div class="compare-head"><h4 style="color:var(--green)">新版 ✓ <span class="delta-up">↑ 信心增强</span></h4></div>
+        <div class="compare-content">
+          <div class="bars">
+            <div class="bar-row"><span class="bar-lbl none winner">no_skill_needed ← winner</span><div class="bar-trk"><div class="bar-fill f-none" style="width:90%">0.900</div></div></div>
+            <div class="bar-row"><span class="bar-lbl">mcp-builder</span><div class="bar-trk"><div class="bar-fill f-choice" style="width:7%">0.070</div></div></div>
+            <div class="bar-row"><span class="bar-lbl">update-config</span><div class="bar-trk"><div class="bar-fill f-choice" style="width:2%">0.020</div></div></div>
+          </div>
+          <div class="verdict v-correct">✓ no_skill_needed 0.900 → 正确（信心从 0.640 提升到 0.900）</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== SCENARIO 3 — KEY IMPROVEMENT ===== -->
+<div class="scenario">
+  <div class="scenario-head">
+    <h3>场景 3：移除"MCP检查"后询问检查 MCP 服务 <span style="color:var(--accent);font-size:12px">← 关键改进</span></h3>
+    <span class="scenario-tag tag-blind">roster 盲区</span>
+  </div>
+  <div class="scenario-body">
+    <div class="query-box">query: "检查我的 MCP 服务的工具设计是否合理，正交性如何"<br><span class="removed">移除: MCP检查 · 预期: no_skill_needed</span></div>
+    <div class="compare">
+      <div class="compare-col">
+        <div class="compare-head"><h4 style="color:var(--red)">旧版 ✗</h4></div>
+        <div class="compare-content">
+          <div class="bars">
+            <div class="bar-row"><span class="bar-lbl winner">mcp-builder ← winner</span><div class="bar-trk"><div class="bar-fill f-choice" style="width:72%">0.720</div></div></div>
+            <div class="bar-row"><span class="bar-lbl">设计文档审核</span><div class="bar-trk"><div class="bar-fill f-choice" style="width:20%">0.200</div></div></div>
+            <div class="bar-row"><span class="bar-lbl none">no_skill_needed</span><div class="bar-trk"><div class="bar-fill f-none" style="width:6%">0.060</div></div></div>
+          </div>
+          <div class="verdict v-wrong">✗ mcp-builder 0.720 胜出 → 被"MCP"关键词误导<br>"构建 MCP" ≠ "检查 MCP 质量"</div>
+        </div>
+      </div>
+      <div class="compare-col">
+        <div class="compare-head"><h4 style="color:var(--green)">新版 ✓ <span class="delta-up">↑ 翻转</span></h4></div>
+        <div class="compare-content">
+          <div class="bars">
+            <div class="bar-row"><span class="bar-lbl none winner">no_skill_needed ← winner</span><div class="bar-trk"><div class="bar-fill f-none" style="width:63%">0.630</div></div></div>
+            <div class="bar-row"><span class="bar-lbl">设计文档审核</span><div class="bar-trk"><div class="bar-fill f-choice" style="width:32%">0.320</div></div></div>
+            <div class="bar-row"><span class="bar-lbl">mcp-builder</span><div class="bar-trk"><div class="bar-fill f-choice" style="width:4%">0.040</div></div></div>
+          </div>
+          <div class="verdict v-correct">✓ no_skill_needed 0.630 胜出 → 正确识别<br>新版让 jev 理解"构建 MCP 的指导" ≠ "检查 MCP 质量的指导"</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== SCENARIO 4 — KEY IMPROVEMENT ===== -->
+<div class="scenario">
+  <div class="scenario-head">
+    <h3>场景 4：移除"设计文档审核"后询问审核设计文档 <span style="color:var(--accent);font-size:12px">← 关键改进</span></h3>
+    <span class="scenario-tag tag-blind">roster 盲区</span>
+  </div>
+  <div class="scenario-body">
+    <div class="query-box">query: "审核我的设计文档看看有什么遗漏和矛盾"<br><span class="removed">移除: 设计文档审核 · 预期: no_skill_needed</span></div>
+    <div class="compare">
+      <div class="compare-col">
+        <div class="compare-head"><h4 style="color:var(--red)">旧版 ✗</h4></div>
+        <div class="compare-content">
+          <div class="bars">
+            <div class="bar-row"><span class="bar-lbl winner">提交后文档回扫 ← winner</span><div class="bar-trk"><div class="bar-fill f-choice" style="width:49%">0.490</div></div></div>
+            <div class="bar-row"><span class="bar-lbl">修复方案审核</span><div class="bar-trk"><div class="bar-fill f-choice" style="width:32%">0.320</div></div></div>
+            <div class="bar-row"><span class="bar-lbl none">no_skill_needed</span><div class="bar-trk"><div class="bar-fill f-none" style="width:19%">0.190</div></div></div>
+          </div>
+          <div class="verdict v-wrong">✗ 提交后文档回扫 0.490 胜出 → 被"文档"+"审核"关键词误导<br>"git commit 前文档同步检查" ≠ "设计文档审核"</div>
+        </div>
+      </div>
+      <div class="compare-col">
+        <div class="compare-head"><h4 style="color:var(--green)">新版 ✓ <span class="delta-up">↑ 翻转</span></h4></div>
+        <div class="compare-content">
+          <div class="bars">
+            <div class="bar-row"><span class="bar-lbl none winner">no_skill_needed ← winner</span><div class="bar-trk"><div class="bar-fill f-none" style="width:73%">0.730</div></div></div>
+            <div class="bar-row"><span class="bar-lbl">修复方案审核</span><div class="bar-trk"><div class="bar-fill f-choice" style="width:17%">0.170</div></div></div>
+            <div class="bar-row"><span class="bar-lbl">提交后文档回扫</span><div class="bar-trk"><div class="bar-fill f-choice" style="width:10%">0.100</div></div></div>
+          </div>
+          <div class="verdict v-correct">✓ no_skill_needed 0.730 胜出 → 正确识别<br>新版让 jev 理解"文档同步检查的指导" ≠ "设计文档审核的指导"</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== SCENARIO 5 ===== -->
+<div class="scenario">
+  <div class="scenario-head">
+    <h3>场景 5：纯文字够用（控制组）</h3>
+    <span class="scenario-tag tag-control">控制组</span>
+  </div>
+  <div class="scenario-body">
+    <div class="query-box">query: "解释一下 Python 的装饰器是怎么工作的，给个例子"<br><span class="removed">roster: 15 skills · 未移除 · 预期: no_skill_needed</span></div>
+    <div class="compare">
+      <div class="compare-col">
+        <div class="compare-head"><h4 style="color:var(--green)">旧版 ✓</h4></div>
+        <div class="compare-content">
+          <div class="bars">
+            <div class="bar-row"><span class="bar-lbl none winner">no_skill_needed ← winner</span><div class="bar-trk"><div class="bar-fill f-none" style="width:100%">1.000</div></div></div>
+          </div>
+          <div class="verdict v-correct">✓ 1.000 → 正确</div>
+        </div>
+      </div>
+      <div class="compare-col">
+        <div class="compare-head"><h4 style="color:var(--green)">新版 ✓</h4></div>
+        <div class="compare-content">
+          <div class="bars">
+            <div class="bar-row"><span class="bar-lbl none winner">no_skill_needed ← winner</span><div class="bar-trk"><div class="bar-fill f-none" style="width:100%">1.000</div></div></div>
+          </div>
+          <div class="verdict v-correct">✓ 1.000 → 正确</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== SCENARIO 6 — KEY IMPROVEMENT ===== -->
+<div class="scenario">
+  <div class="scenario-head">
+    <h3>场景 6：移除"mcp-builder"后询问构建 MCP 服务 <span style="color:var(--accent);font-size:12px">← 关键改进</span></h3>
+    <span class="scenario-tag tag-blind">roster 盲区</span>
+  </div>
+  <div class="scenario-body">
+    <div class="query-box">query: "我想构建一个 MCP 服务来对接我的内部 API"<br><span class="removed">移除: mcp-builder · 预期: no_skill_needed</span></div>
+    <div class="compare">
+      <div class="compare-col">
+        <div class="compare-head"><h4 style="color:var(--red)">旧版 ✗</h4></div>
+        <div class="compare-content">
+          <div class="bars">
+            <div class="bar-row"><span class="bar-lbl winner">技能创建 ← winner</span><div class="bar-trk"><div class="bar-fill f-choice" style="width:53%">0.530</div></div></div>
+            <div class="bar-row"><span class="bar-lbl none">no_skill_needed</span><div class="bar-trk"><div class="bar-fill f-none" style="width:27%">0.270</div></div></div>
+            <div class="bar-row"><span class="bar-lbl">MCP检查</span><div class="bar-trk"><div class="bar-fill f-choice" style="width:20%">0.200</div></div></div>
+          </div>
+          <div class="verdict v-wrong">✗ 技能创建 0.530 胜出 → 被"创建/构建"动词误导<br>"创建 skill 的指导" ≠ "构建 MCP 服务的指导"</div>
+        </div>
+      </div>
+      <div class="compare-col">
+        <div class="compare-head"><h4 style="color:var(--green)">新版 ✓ <span class="delta-up">↑ 翻转</span></h4></div>
+        <div class="compare-content">
+          <div class="bars">
+            <div class="bar-row"><span class="bar-lbl none winner">no_skill_needed ← winner</span><div class="bar-trk"><div class="bar-fill f-none" style="width:95%">0.950</div></div></div>
+            <div class="bar-row"><span class="bar-lbl">技能创建</span><div class="bar-trk"><div class="bar-fill f-choice" style="width:4%">0.040</div></div></div>
+            <div class="bar-row"><span class="bar-lbl">MCP检查</span><div class="bar-trk"><div class="bar-fill f-choice" style="width:1%">0.010</div></div></div>
+          </div>
+          <div class="verdict v-correct">✓ no_skill_needed 0.950 胜出 → 正确识别<br>新版让 jev 理解"创建 skill 的指导" ≠ "构建 MCP 服务的指导"</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== ANALYSIS ===== -->
+<div class="analysis">
+  <h2>结论：问题在 instructions 措辞，不在机制</h2>
+
+  <p><b style="color:var(--text-bright)" class="hl">改进效果：2/6 → 6/6（+4 场景翻转）</b></p>
+  <p>仅修改 instructions 措辞，不改机制（choice + no_skill_needed 选项），准确率从 2/6 提升到 6/6。4 个失败场景全部翻转。</p>
+
+  <p style="margin-top:16px"><b style="color:var(--text-bright)">旧版的问题</b></p>
+  <p>旧版说 <code>"best matches the query"</code> 和 <code>"Judge by scope match, not keyword overlap"</code>。问题在于"scope match"对 jev 来说太模糊——mcp-builder 的 scope 是"MCP 服务"，查询"检查 MCP 服务"也在 MCP scope 内，所以 jev 认为是 scope match。旧版没有告诉 jev <b>技能的本质是什么</b>。</p>
+
+  <p style="margin-top:16px"><b style="color:var(--text-bright)">新版的改进</b></p>
+  <p>
+    1. <b>定义技能本质</b>："A skill is a set of instructions, guidelines, or best practices for accomplishing a specific type of task — not merely a tool or API that shares keywords with the query."<br>
+    2. <b>强调"需要遵循"</b>："the assistant would actually need to load and <b>follow</b> to answer, solve, or complete the user's request"<br>
+    3. <b>明确排除条件</b>："Do NOT pick a skill merely because it shares topic keywords, operates in the same domain, or is tangentially related"<br>
+    4. <b>no_skill_needed 描述更具体</b>：用 <code>"checking MCP quality" vs "building MCP servers"</code> 和 <code>"design doc review" vs "post-commit doc sync check"</code> 等真实对比示例说明何时选择
+  </p>
+
+  <p style="margin-top:16px"><b style="color:var(--text-bright)" class="warn">启示</b></p>
+  <p>
+    在设计 jev 决策工具时，<b>instructions 措辞是影响决策质量的最大杠杆</b>。机制（choice/noul/gate/fits）提供框架，但 jev 模型的判断质量取决于 instructions 如何定义"匹配"的语义。好的 instructions 应该：
+    <br>• <b>定义评估对象的本质</b>（技能是指导说明，不是语义相关的工具）
+    <br>• <b>用真实对比示例说明边界</b>（构建 vs 检查、创建技能 vs 创建 MCP 服务）
+    <br>• <b>明确排除条件</b>（不要因为关键词重叠或领域相同就选）
+  </p>
+</div>
+
+</div>
+</body>
+</html>

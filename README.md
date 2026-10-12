@@ -42,18 +42,17 @@ python -m jev_harness_tool.server   # 等价
 fastmcp run src/jev_harness_tool/server.py:mcp --transport streamable-http --host 127.0.0.1 --port 8000
 ```
 
-## 工具一览（9 个）
+## 工具一览（8 个）
 
 签名以 `src/jev_harness_tool/tools/*.py` 源码为准；所有阈值参数均为可选、带默认值，响应回显实际使用的 `thresholds` 与完整 `usage`（input_tokens / cost_usd）。
 
 | 工具 | 用途 | 关键输入 | 关键输出 |
 |---|---|---|---|
 | `jev_decide` | 通用决策原语：state + 一组 choice/score/noul 问题 → 校准 answers（透传 /api/v1/decide） | `state`、`questions`、`model?` | `model`、`answers`、`usage` |
-| `route_decide` | 路由决策：请求应交给哪个候选执行者（含 none/uncertain 逃生舱 + margin 判据） | `query`、`candidates{name: 职责定义}`、`context?`、`route_threshold=0.5`、`margin_threshold=0.15` | `verdict`(routed/no_route/uncertain/review/invalid_response)、`route`、`action`、`probabilities`、`margin`、`complexity?` |
 | `effort_route` | 推理投入决策：请求需要哪个 effort/thinking 档位（含 CDF 保守选档） | `query`、`levels{档位: 定义}`、`context?`、`effort_threshold=0.5`、`margin_threshold=0.15`、`safety_threshold=0.9` | `verdict`(selected/uncertain/review/invalid_response)、`effort`、`conservative_level`、`action`、`probabilities`、`level_order` |
 | `memory_gate` | 记忆加载门控：当前 query 是否需要加载长期记忆（双阈值三档处置） | `query`、`memory_description`、`description_kind=summary/index`、`context?`、`threshold=0.5`、`high_threshold=0.8` | `needed`、`probability`、`verdict`(needed/not_needed/invalid_response)、`action`(inject_full/inject_index/skip/review) |
-| `skill_search` | 技能检索决策：multi 每技能独立 noul 多选；choice 单选 + 存在性门控 + margin | `query`、`skills[{name,description}]`、`mode=multi/choice`、`threshold=0.3`、`max_results=5`、`margin_threshold=0.15`、`exists_threshold=0.3` | `selected/reviewed/skipped/invalid[]`、`none_probability`、`batches`、`detail?`(choice) |
-| `reference_verify` | 内联引用验证：被引 passage 是否支持 claim（每对 support noul + relation choice，自动分批并发） | `pairs[{id?,claim,passage,source?}]`、`support_threshold=0.7`、`relation_margin=0.15`、`passage_max_chars=8000`、`max_pairs=50` | `results[]`（`verdict`: supported/partially_supported/unsupported/contradicted/review/invalid_response、`action`: allow/review/block、`invalid_reason`）、`summary` |
+| `skill_search` | 技能检索决策：auto 单模式——skills ≤ switch_threshold 时单步 choice（criteria 内嵌 no_skill_needed 逃生舱），超过时两步（noul 召回 → choice 精排 + fits noul） | `query`、`skills[{name,description}]`、`threshold=0.3`、`max_results=5`、`margin_threshold=0.15`、`exists_threshold=0.3`、`fits_threshold=0.3`、`switch_threshold=50`、`recall_top_k=5` | `mode`(auto)、`steps`、`selected/reviewed/skipped/invalid[]`、`none_probability`、`batches`、`detail` |
+| `reference_verify` | 内联引用验证：被引 passage（可附所在段落 context）是否支持 claim（每对 support noul + relation choice，自动分批并发） | `pairs[{id?,claim,passage,context?,source?}]`、`support_threshold=0.7`、`relation_margin=0.15`、`passage_max_chars=8000`、`context_max_chars=8000`、`max_pairs=50` | `results[]`（`verdict`: supported/partially_supported/unsupported/contradicted/review/invalid_response、`action`: allow/review/block、`invalid_reason`）、`summary` |
 | `context_filter` | 上下文条目语义去留：单条走 jev 现成端点 context/filter；批量归约 /decide，keep/truncate/drop + 冗余覆盖 | `task`、`item` 或 `items[{id,content}]`（恰填其一）、`keep_min_relevance=moderate`、`confidence_min=0.4`、`action_prob_min=0.5`、`margin_min=0.2`、`redundancy_check=True` | 单条：`verdict`、`jev_action`、`relevance`、`redundant`、`confidence`；批量：`results[]`（概率分布 + margin + redundant）、`summary`、`batches` |
 | `result_verify` | 结果门控：产出是否满足 requirement（noul + 可选 4 级完成度 score） | `requirement`、`result`、`threshold_pass=0.8`、`threshold_fail=0.4`、`include_completeness=True`、`result_max_chars=8000` | `verdict`(passed/review/failed/invalid_response)、`passed`、`probability`、`completeness` |
 | `tool_risk_gate` | 工具调用前的语义风险门控（薄封装 jev 现成端点 agent/risk） | `goal`、`tool`、`arguments`、`context?`、`risk_allow_max=0.3`、`risk_block_min=0.7`、`confidence_min=0.4` | `verdict`(allow/review/block/invalid_response)、`jev_action`、`risk`、`categories`、`confidence` |
@@ -63,8 +62,8 @@ fastmcp run src/jev_harness_tool/server.py:mcp --transport streamable-http --hos
 ## 测试
 
 ```bash
-pytest -m "not real"   # 默认：mock jev API（本地 HTTP mock + 真实 client 端到端），217 个用例，不烧 credits
-pytest -m real         # 真实 API（14 个用例），需 .env 中的 JV_API_KEY，会产生计费
+pytest -m "not real"   # 默认：mock jev API（本地 HTTP mock + 真实 client 端到端），198 个用例，不烧 credits
+pytest -m real         # 真实 API（35 个用例），需 .env 中的 JV_API_KEY，会产生计费
 ```
 
 ## 文档导航

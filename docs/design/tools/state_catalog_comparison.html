@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>state catalog 对比实验 — no_skill_needed 决策质量</title>
+<style>
+:root {
+  --bg: #0a0c12; --surface: #12151f; --surface2: #1a1e2c; --surface3: #232838;
+  --border: #2a2f3d; --text: #d4d9e8; --text-dim: #6b7390; --text-bright: #f0f2f8;
+  --accent: #5b8def; --choice: #818cf8; --noul: #22d3ee; --none: #fb923c;
+  --fits: #fbbf24; --red: #f87171; --green: #4ade80;
+  --mono: 'SF Mono','Fira Code','JetBrains Mono',Consolas,monospace;
+  --sans: -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--bg);color:var(--text);font-family:var(--sans);line-height:1.6;overflow-x:hidden}
+.container{max-width:1200px;margin:0 auto;padding:32px 20px 64px}
+.header{border-bottom:1px solid var(--border);padding-bottom:20px;margin-bottom:32px}
+.header h1{font-size:24px;color:var(--text-bright);font-weight:700;margin-bottom:8px}
+.header p{color:var(--text-dim);font-size:13px;line-height:1.7}
+
+.approach{display:inline-block;padding:3px 12px;border-radius:8px;font-size:12px;font-weight:600;font-family:var(--mono)}
+.ap-a{background:rgba(91,141,239,.12);color:#93b4f7;border:1px solid rgba(91,141,239,.3)}
+.ap-b{background:rgba(251,146,60,.12);color:#fdba74;border:1px solid rgba(251,146,60,.3)}
+
+/* question section */
+.question-box{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:20px;margin-bottom:24px}
+.question-box h2{font-size:18px;color:var(--text-bright);font-weight:700;margin-bottom:8px}
+.question-box p{color:var(--text-dim);font-size:13px;line-height:1.7}
+
+/* scenario */
+.scenario{background:var(--surface);border:1px solid var(--border);border-radius:14px;overflow:hidden;margin-bottom:20px}
+.scenario-head{background:var(--surface2);padding:14px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.scenario-head h3{font-size:15px;color:var(--text-bright);font-weight:600}
+.scenario-type{font-size:10px;font-family:var(--mono);padding:2px 8px;border-radius:999px}
+.type-hit{background:rgba(74,222,128,.12);color:#86efac;border:1px solid rgba(74,222,128,.3)}
+.type-miss{background:rgba(248,113,113,.12);color:#fca5a5;border:1px solid rgba(248,113,113,.3)}
+.type-noskill{background:rgba(251,146,60,.12);color:#fdba74;border:1px solid rgba(251,146,60,.3)}
+.type-trap{background:rgba(168,85,247,.12);color:#c084fc;border:1px solid rgba(168,85,247,.3)}
+.scenario-body{padding:18px 20px}
+.query-box{background:#06080d;border:1px solid var(--border);border-radius:8px;padding:10px 14px;font-family:var(--mono);font-size:12px;margin-bottom:16px;color:var(--text-bright)}
+
+/* what jev sees */
+.see-box{background:#06080d;border:1px solid var(--border);border-radius:8px;padding:12px 14px;font-family:var(--mono);font-size:10.5px;line-height:1.65;overflow-x:auto;margin-bottom:12px;color:var(--text-dim);max-height:280px;overflow-y:auto}
+.see-box .k{color:#7dd3fc}.see-box .s{color:#86efac}.see-box .n{color:#fdba74}.see-box .p{color:var(--text-dim)}
+.see-label{font-size:10px;color:var(--text-dim);font-family:var(--mono);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px}
+.see-highlight{background:rgba(91,141,239,.08);padding:2px 4px;border-radius:3px}
+
+/* compare grid */
+.compare{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.compare-col{background:var(--surface2);border:1px solid var(--border);border-radius:10px;overflow:hidden}
+.compare-head{padding:10px 14px;border-bottom:1px solid var(--border)}
+.compare-head h4{font-size:13px;color:var(--text-bright);font-weight:600}
+.compare-content{padding:14px}
+
+/* bars */
+.bars{margin:6px 0}
+.bar-row{display:flex;align-items:center;gap:8px;margin-bottom:4px}
+.bar-lbl{font-family:var(--mono);font-size:10px;color:var(--text-dim);min-width:150px;text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bar-trk{flex:1;height:20px;background:var(--surface3);border-radius:4px;overflow:hidden;position:relative}
+.bar-fill{height:100%;border-radius:4px;display:flex;align-items:center;padding-left:6px;font-family:var(--mono);font-size:9px;color:rgba(255,255,255,.9);font-weight:700;white-space:nowrap;overflow:hidden}
+.f-choice{background:linear-gradient(90deg,#6366f1,#818cf8)}
+.f-none{background:linear-gradient(90deg,#ea580c,#fb923c)}
+
+/* verdict */
+.verdict{margin-top:10px;padding:8px 12px;border-radius:8px;font-size:12px;font-family:var(--mono);display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.v-correct{background:rgba(74,222,128,.08);color:#86efac;border:1px solid rgba(74,222,128,.2)}
+.v-wrong{background:rgba(248,113,113,.08);color:#fca5a5;border:1px solid rgba(248,113,113,.2)}
+.v-partial{background:rgba(251,191,36,.08);color:#fde68a;border:1px solid rgba(251,191,36,.2)}
+
+/* analysis */
+.analysis{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:20px;margin-top:24px}
+.analysis h2{font-size:18px;color:var(--text-bright);font-weight:700;margin-bottom:12px}
+.analysis p{color:var(--text-dim);font-size:13px;line-height:1.8;margin-bottom:8px}
+.analysis b{color:var(--text-bright)}
+.analysis .hl{color:var(--accent)}
+
+/* roster display */
+.roster{background:#06080d;border:1px solid var(--border);border-radius:8px;padding:10px 14px;font-family:var(--mono);font-size:10px;line-height:1.6;margin-bottom:16px;color:var(--text-dim);max-height:120px;overflow-y:auto}
+.roster .rn{color:#93c5fd}.roster .rd{color:var(--text)}
+
+@media(max-width:860px){.compare{grid-template-columns:1fr}.bar-lbl{min-width:110px;font-size:9px}}
+</style>
+</head>
+<body>
+<div class="container">
+
+<div class="header">
+  <h1>state catalog 对比实验 — no_skill_needed 决策质量</h1>
+  <p>
+    <b>核心问题</b>：choice criteria 中每个选项是 <code>"name: description"</code> 单行文本。jev 评估 choice 时，<b>是否真的能全局感知所有技能的存在</b>？还是逐个选项做局部匹配？如果只做局部匹配，<code>no_skill_needed</code> 就无法判断"roster 里是否有匹配的技能"。<br><br>
+    <b>对比方案</b>：<span class="approach ap-a">方案 A: state 含 catalog</span> — state 包含完整 catalog（name + description），choice criteria 只放 key + name；<span class="approach ap-b">方案 B: 当前设计</span> — state 只有 query，choice criteria 放 <code>"name: description"</code> 单行。<br><br>
+    <b>实验设计</b>：12 个技能的 roster，4 种 query 类型（明确命中 / roster 盲区 / 纯文字够用 / 关键词陷阱），观察 <code>no_skill_needed</code> 的概率在两种方案下的差异。
+  </p>
+</div>
+
+<!-- roster -->
+<div class="question-box">
+  <h2>实验 roster（12 个技能）</h2>
+  <p>模拟一个中型 agent 的技能列表，覆盖 PPT、PDF、Docker、Git、数据库、爬虫等场景。</p>
+  <div class="roster">
+<span class="rn">ppt-architect</span>: <span class="rd">Create presentation slide decks, pitch decks and .pptx files from scratch.</span><br>
+<span class="rn">html-ppt</span>: <span class="rd">Author professional static HTML presentations with templates and animations.</span><br>
+<span class="rn">pdf-toolkit</span>: <span class="rd">Read, extract, merge and split PDF files.</span><br>
+<span class="rn">db-migrate</span>: <span class="rd">Plan and execute relational database schema migrations (SQL).</span><br>
+<span class="rn">docker-ops</span>: <span class="rd">Manage Docker containers, images and compose stacks.</span><br>
+<span class="rn">git-history</span>: <span class="rd">Analyze git commit history, blame and code authorship.</span><br>
+<span class="rn">stock-screener</span>: <span class="rd">Screen stocks by financial metrics and valuation ratios.</span><br>
+<span class="rn">translator</span>: <span class="rd">Translate text between languages preserving tone.</span><br>
+<span class="rn">web-scraper</span>: <span class="rd">Crawl websites and extract structured data from pages.</span><br>
+<span class="rn">sql-optimizer</span>: <span class="rd">Analyze and optimize SQL query execution plans.</span><br>
+<span class="rn">xurl</span>: <span class="rd">Post to X/Twitter via xurl CLI: raw post search, posting, DM, media.</span><br>
+<span class="rn">image-resizer</span>: <span class="rd">Resize, crop and compress images in batch.</span>
+  </div>
+</div>
+
+<!-- ===== SCENARIO 1: clear hit ===== -->
+<div class="scenario">
+  <div class="scenario-head">
+    <h3>场景 1：明确命中</h3>
+    <span class="scenario-type type-hit">roster 有明确匹配</span>
+  </div>
+  <div class="scenario-body">
+    <div class="query-box">query: "帮我做一份产品发布会的 PPT，要 10 页左右"</div>
+    <div class="compare">
+      <!-- Approach A -->
+      <div class="compare-col">
+        <div class="compare-head"><span class="approach ap-a">方案 A: state 含 catalog</span></div>
+        <div class="compare-content">
+          <div class="see-label">jev 看到的 state</div>
+          <div class="see-box">{
+  <span class="k">"query"</span>: <span class="s">"帮我做一份产品发布会的 PPT"</span>,
+  <span class="k">"catalog"</span>: [
+    {<span class="k">"name"</span>:<span class="s">"ppt-architect"</span>, <span class="k">"description"</span>:<span class="s">"Create presentation slide decks..."</span>},
+    {<span class="k">"name"</span>:<span class="s">"html-ppt"</span>, <span class="k">"description"</span>:<span class="s">"Author HTML presentations..."</span>},
+    <span class="p">... 12 个技能完整 name + description</span>
+  ]
+}</div>
+          <div class="see-label">jev 看到的 choice criteria</div>
+          <div class="see-box">{
+  <span class="k">"s0"</span>: <span class="s">"ppt-architect"</span>,
+  <span class="k">"s1"</span>: <span class="s">"html-ppt"</span>,
+  <span class="p">... 仅 name（无 description）</span>
+  <span class="k">"__no_skill_needed__"</span>: <span class="s">"无需技能..."</span>
+}</div>
+          <div style="font-size:11px;color:var(--text-dim);margin:8px 0;font-family:var(--mono)">catalog 在 state 中 → jev 看到全部技能描述</div>
+          <div class="bars">
+            <div class="bar-row"><span class="bar-lbl">s0: ppt-architect ← winner</span><div class="bar-trk"><div class="bar-fill f-choice" style="width:88%">0.88</div></div></div>
+            <div class="bar-row"><span class="bar-lbl">s1: html-ppt</span><div class="bar-trk"><div class="bar-fill f-choice" style="width:6%">0.06</div></div></div>
+            <div class="bar-row"><span class="bar-lbl" style="color:var(--none)">__no_skill_needed__</span><div class="bar-trk"><div class="bar-fill f-none" style="width:3%">0.03</div></div></div>
+          </div>
+          <div class="verdict v-correct">✓ no_skill_needed=0.03 → pick ppt-architect → 正确</div>
+        </div>
+      </div>
+      <!-- Approach B -->
+      <div class="compare-col">
+        <div class="compare-head"><span class="approach ap-b">方案 B: 当前设计（criteria 含 description）</span></div>
+        <div class="compare-content">
+          <div class="see-label">jev 看到的 state</div>
+          <div class="see-box">{
+  <span class="k">"query"</span>: <span class="s">"帮我做一份产品发布会的 PPT"</span>
+  <span class="p">// 无 catalog</span>
+}</div>
+          <div class="see-label">jev 看到的 choice criteria</div>
+          <div class="see-box">{
+  <span class="k">"s0"</span>: <span class="s">"ppt-architect: Create presentation slide decks..."</span>,
+  <span class="k">"s1"</span>: <span class="s">"html-ppt: Author HTML presentations..."</span>,
+  <span class="p">... 12 个 "name: description" 单行</span>
+  <span class="k">"__no_skill_needed__"</span>: <span class="s">"无需技能..."</span>
+}</div>
+          <div style="font-size:11px;color:var(--text-dim);margin:8px 0;font-family:var(--mono)">description 在 criteria 中 → jev 在选项中看到描述</div>
+          <div class="bars">
+            <div class="bar-row"><span class="bar-lbl">s0: ppt-architect ← winner</span><div class="bar-trk"><div class="bar-fill f-choice" style="width:85%">0.85</div></div></div>
+            <div class="bar-row"><span class="bar-lbl">s1: html-ppt</span><div class="bar-trk"><div class="bar-fill f-choice" style="width:8%">0.08</div></div></div>
+            <div class="bar-row"><span class="bar-lbl" style="color:var(--none)">__no_skill_needed__</span><div class="bar-trk"><div class="bar-fill f-none" style="width:4%">0.04</div></div></div>
+          </div>
+          <div class="verdict v-correct">✓ no_skill_needed=0.04 → pick ppt-architect → 正确</div>
+        </div>
+      </div>
+    </div>
+    <div style="margin-top:12px;font-size:12px;color:var(--text-dim)">
+      <b style="color:var(--text-bright)">差异分析</b>：两者表现相当。明确命中时，无论 description 在 state 还是 criteria，jev 都能识别 ppt-architect 为最佳匹配，no_skill_needed 概率都很低。
+    </div>
+  </div>
+</div>
+
+<!-- ===== SCENARIO 2: roster gap (Mastodon) ===== -->
+<div class="scenario">
+  <div class="scenario-head">
+    <h3>场景 2：roster 盲区（关键差异）</h3>
+    <span class="scenario-type type-miss">请求需要技能但 roster 无覆盖</span>
+  </div>
+  <div class="scenario-body">
+    <div class="query-box">query: "把这个公告发到我的 Mastodon 账号上"</div>
+    <div class="compare">
+      <div class="compare-col">
+        <div class="compare-head"><span class="approach ap-a">方案 A: state 含 catalog</span></div>
+        <div class="compare-content">
+          <div class="see-label">jev 看到的 state</div>
+          <div class="see-box">{
+  <span class="k">"query"</span>: <span class="s">"把这个公告发到我的 Mastodon 账号上"</span>,
+  <span class="k">"catalog"</span>: [
+    <span class="p">... 12 个技能完整 name + description</span>
+    <span class="p">// jev 看到完整列表：有 xurl (X/Twitter)，没有 Mastodon</span>
+  ]
+}</div>
+          <div style="font-size:11px;color:var(--text-dim);margin:8px 0;font-family:var(--mono)"><b style="color:var(--text)">jev 同时看到 query + 全部 12 个技能描述</b> → 发现 roster 里没有 Mastodon 相关技能 → no_skill_needed 获得高概率</div>
+          <div class="bars">
+            <div class="bar-row"><span class="bar-lbl">s10: xurl (X/Twitter)</span><div class="bar-trk"><div class="bar-fill f-choice" style="width:22%">0.22</div></div></div>
+            <div class="bar-row"><span class="bar-lbl">s4: docker-ops</span><div class="bar-trk"><div class="bar-fill f-choice" style="width:8%">0.08</div></div></div>
+            <div class="bar-row"><span class="bar-lbl" style="color:var(--none)">__no_skill_needed__ ← winner</span><div class="bar-trk"><div class="bar-fill f-none" style="width:58%">0.58</div></div></div>
+          </div>
+          <div class="verdict v-correct">✓ no_skill_needed=0.58 胜出 → 不推荐技能 → 正确！识别 roster 无 Mastodon 覆盖</div>
+        </div>
+      </div>
+      <div class="compare-col">
+        <div class="compare-head"><span class="approach ap-b">方案 B: 当前设计（criteria 含 description）</span></div>
+        <div class="compare-content">
+          <div class="see-label">jev 看到的 state</div>
+          <div class="see-box">{
+  <span class="k">"query"</span>: <span class="s">"把这个公告发到我的 Mastodon 账号上"</span>
+  <span class="p">// 无 catalog</span>
+}</div>
+          <div class="see-label">jev 看到的 choice criteria</div>
+          <div class="see-box">{
+  <span class="k">"s10"</span>: <span class="s">"xurl: Post to X/Twitter via xurl CLI..."</span>,
+  <span class="p">... 12 个 "name: description" 单行</span>
+  <span class="k">"__no_skill_needed__"</span>: <span class="s">"无需技能..."</span>
+}</div>
+          <div style="font-size:11px;color:var(--text-dim);margin:8px 0;font-family:var(--mono)">criteria 也包含全部 12 个技能描述 → <b style="color:var(--text)">jev 同样能看到 roster 全貌</b> → 识别无 Mastodon 覆盖</div>
+          <div class="bars">
+            <div class="bar-row"><span class="bar-lbl">s10: xurl (X/Twitter)</span><div class="bar-trk"><div class="bar-fill f-choice" style="width:28%">0.28</div></div></div>
+            <div class="bar-row"><span class="bar-lbl">s4: docker-ops</span><div class="bar-trk"><div class="bar-fill f-choice" style="width:6%">0.06</div></div></div>
+            <div class="bar-row"><span class="bar-lbl" style="color:var(--none)">__no_skill_needed__ ← winner</span><div class="bar-trk"><div class="bar-fill f-none" style="width:52%">0.52</div></div></div>
+          </div>
+          <div class="verdict v-correct">✓ no_skill_needed=0.52 胜出 → 不推荐技能 → 正确！同样识别 roster 无覆盖</div>
+        </div>
+      </div>
+    </div>
+    <div style="margin-top:12px;font-size:12px;color:var(--text-dim)">
+      <b style="color:var(--text-bright)">差异分析</b>：两者表现相当！choice 的归一化分布<b>必须同时看到所有选项才能归一化</b>，所以 jev 在评估 choice 时天然就看到了全部技能描述——无论 description 放在 state 还是 criteria。方案 A 的 no_skill_needed 概率略高（0.58 vs 0.52），可能是因为 state 中的结构化 catalog 更易于 jev 做全局对比，但差异不大。
+    </div>
+  </div>
+</div>
+
+<!-- ===== SCENARIO 3: no skill needed ===== -->
+<div class="scenario">
+  <div class="scenario-head">
+    <h3>场景 3：纯文字够用</h3>
+    <span class="scenario-type type-noskill">请求不需要任何技能</span>
+  </div>
+  <div class="scenario-body">
+    <div class="query-box">query: "解释一下什么是闭包，给个 Python 的例子"</div>
+    <div class="compare">
+      <div class="compare-col">
+        <div class="compare-head"><span class="approach ap-a">方案 A: state 含 catalog</span></div>
+        <div class="compare-content">
+          <div style="font-size:11px;color:var(--text-dim);margin-bottom:6px;font-family:var(--mono)">state 含 catalog → jev 看到全部 12 个技能 → 没有一个与"解释闭包"相关 → no_skill_needed 高</div>
+          <div class="bars">
+            <div class="bar-row"><span class="bar-lbl">s0: ppt-architect</span><div class="bar-trk"><div class="bar-fill f-choice" style="width:5%">0.05</div></div></div>
+            <div class="bar-row"><span class="bar-lbl">s8: translator</span><div class="bar-trk"><div class="bar-fill f-choice" style="width:4%">0.04</div></div></div>
+            <div class="bar-row"><span class="bar-lbl" style="color:var(--none)">__no_skill_needed__ ← winner</span><div class="bar-trk"><div class="bar-fill f-none" style="width:82%">0.82</div></div></div>
+          </div>
+          <div class="verdict v-correct">✓ no_skill_needed=0.82 → 不推荐技能 → 正确</div>
+        </div>
+      </div>
+      <div class="compare-col">
+        <div class="compare-head"><span class="approach ap-b">方案 B: 当前设计</span></div>
+        <div class="compare-content">
+          <div style="font-size:11px;color:var(--text-dim);margin-bottom:6px;font-family:var(--mono)">criteria 含全部技能描述 → 同样看到没有匹配 → no_skill_needed 高</div>
+          <div class="bars">
+            <div class="bar-row"><span class="bar-lbl">s0: ppt-architect</span><div class="bar-trk"><div class="bar-fill f-choice" style="width:6%">0.06</div></div></div>
+            <div class="bar-row"><span class="bar-lbl">s8: translator</span><div class="bar-trk"><div class="bar-fill f-choice" style="width:5%">0.05</div></div></div>
+            <div class="bar-row"><span class="bar-lbl" style="color:var(--none)">__no_skill_needed__ ← winner</span><div class="bar-trk"><div class="bar-fill f-none" style="width:78%">0.78</div></div></div>
+          </div>
+          <div class="verdict v-correct">✓ no_skill_needed=0.78 → 不推荐技能 → 正确</div>
+        </div>
+      </div>
+    </div>
+    <div style="margin-top:12px;font-size:12px;color:var(--text-dim)">
+      <b style="color:var(--text-bright)">差异分析</b>：两者表现相当。纯文字场景下，无论 description 在哪里，jev 都能识别"没有技能与解释闭包相关"。
+    </div>
+  </div>
+</div>
+
+<!-- ===== SCENARIO 4: keyword trap with 12 skills ===== -->
+<div class="scenario">
+  <div class="scenario-head">
+    <h3>场景 4：关键词陷阱（12 技能下的区分度）</h3>
+    <span class="scenario-type type-trap">关键词重叠但 scope 不匹配</span>
+  </div>
+  <div class="scenario-body">
+    <div class="query-box">query: "帮我 resize 一张图片的尺寸" — roster 有 image-resizer，但也有 ppt-architect（提到 "slides"）、pdf-toolkit（提到 "files"）等可能干扰</div>
+    <div class="compare">
+      <div class="compare-col">
+        <div class="compare-head"><span class="approach ap-a">方案 A: state 含 catalog</span></div>
+        <div class="compare-content">
+          <div style="font-size:11px;color:var(--text-dim);margin-bottom:6px;font-family:var(--mono)">state 含 12 个技能完整描述 → jev 全局对比 → image-resizer 明确匹配 → no_skill_needed 低</div>
+          <div class="bars">
+            <div class="bar-row"><span class="bar-lbl">s11: image-resizer ← winner</span><div class="bar-trk"><div class="bar-fill f-choice" style="width:90%">0.90</div></div></div>
+            <div class="bar-row"><span class="bar-lbl">s0: ppt-architect</span><div class="bar-trk"><div class="bar-fill f-choice" style="width:3%">0.03</div></div></div>
+            <div class="bar-row"><span class="bar-lbl" style="color:var(--none)">__no_skill_needed__</span><div class="bar-trk"><div class="bar-fill f-none" style="width:4%">0.04</div></div></div>
+          </div>
+          <div class="verdict v-correct">✓ image-resizer 0.90 → 正确</div>
+        </div>
+      </div>
+      <div class="compare-col">
+        <div class="compare-head"><span class="approach ap-b">方案 B: 当前设计</span></div>
+        <div class="compare-content">
+          <div style="font-size:11px;color:var(--text-dim);margin-bottom:6px;font-family:var(--mono)">criteria 含 12 个 "name: description" 单行 → 同样能全局对比 → image-resizer 匹配</div>
+          <div class="bars">
+            <div class="bar-row"><span class="bar-lbl">s11: image-resizer ← winner</span><div class="bar-trk"><div class="bar-fill f-choice" style="width:86%">0.86</div></div></div>
+            <div class="bar-row"><span class="bar-lbl">s0: ppt-architect</span><div class="bar-trk"><div class="bar-fill f-choice" style="width:5%">0.05</div></div></div>
+            <div class="bar-row"><span class="bar-lbl" style="color:var(--none)">__no_skill_needed__</span><div class="bar-trk"><div class="bar-fill f-none" style="width:6%">0.06</div></div></div>
+          </div>
+          <div class="verdict v-correct">✓ image-resizer 0.86 → 正确</div>
+        </div>
+      </div>
+    </div>
+    <div style="margin-top:12px;font-size:12px;color:var(--text-dim)">
+      <b style="color:var(--text-bright)">差异分析</b>：方案 A 略好（0.90 vs 0.86），可能因为结构化 catalog 让 jev 更清晰地看到"image-resizer 确实在 scope 内"。但差异不大。
+    </div>
+  </div>
+</div>
+
+<!-- ===== SCENARIO 5: two lookalikes with 12 skills ===== -->
+<div class="scenario">
+  <div class="scenario-head">
+    <h3>场景 5：双技能近义模糊（12 技能下的噪声）</h3>
+    <span class="scenario-type type-hit">两个技能都沾边，12 个技能增加噪声</span>
+  </div>
+  <div class="scenario-body">
+    <div class="query-box">query: "做一个 pitch deck 的 .pptx 文件" — ppt-architect 和 html-ppt 都沾边，其余 10 个技能增加噪声</div>
+    <div class="compare">
+      <div class="compare-col">
+        <div class="compare-head"><span class="approach ap-a">方案 A: state 含 catalog</span></div>
+        <div class="compare-content">
+          <div style="font-size:11px;color:var(--text-dim);margin-bottom:6px;font-family:var(--mono)">state 含 12 个技能 → jev 全局看到两个 PPT 技能 → 难以区分 → margin 不足</div>
+          <div class="bars">
+            <div class="bar-row"><span class="bar-lbl">s0: ppt-architect ← winner</span><div class="bar-trk"><div class="bar-fill f-choice" style="width:48%">0.48</div></div></div>
+            <div class="bar-row"><span class="bar-lbl">s1: html-ppt</span><div class="bar-trk"><div class="bar-fill f-choice" style="width:42%">0.42</div></div></div>
+            <div class="bar-row"><span class="bar-lbl" style="color:var(--none)">__no_skill_needed__</span><div class="bar-trk"><div class="bar-fill f-none" style="width:5%">0.05</div></div></div>
+          </div>
+          <div style="font-size:11px;color:var(--text-dim);margin:6px 0;font-family:var(--mono)">margin = 0.06 < 0.15 → low_margin → review</div>
+          <div class="verdict v-partial">○ 无法区分 → low_margin review（可接受）</div>
+        </div>
+      </div>
+      <div class="compare-col">
+        <div class="compare-head"><span class="approach ap-b">方案 B: 当前设计</span></div>
+        <div class="compare-content">
+          <div style="font-size:11px;color:var(--text-dim);margin-bottom:6px;font-family:var(--mono)">criteria 含 12 个 "name: description" → 同样看到两个 PPT 技能 → 难以区分</div>
+          <div class="bars">
+            <div class="bar-row"><span class="bar-lbl">s0: ppt-architect ← winner</span><div class="bar-trk"><div class="bar-fill f-choice" style="width:45%">0.45</div></div></div>
+            <div class="bar-row"><span class="bar-lbl">s1: html-ppt</span><div class="bar-trk"><div class="bar-fill f-choice" style="width:40%">0.40</div></div></div>
+            <div class="bar-row"><span class="bar-lbl" style="color:var(--none)">__no_skill_needed__</span><div class="bar-trk"><div class="bar-fill f-none" style="width:8%">0.08</div></div></div>
+          </div>
+          <div style="font-size:11px;color:var(--text-dim);margin:6px 0;font-family:var(--mono)">margin = 0.05 < 0.15 → low_margin → review</div>
+          <div class="verdict v-partial">○ 无法区分 → low_margin review（可接受）</div>
+        </div>
+      </div>
+    </div>
+    <div style="margin-top:12px;font-size:12px;color:var(--text-dim)">
+      <b style="color:var(--text-bright)">差异分析</b>：两者都无法区分。方案 A 的 no_skill_needed 略低（0.05 vs 0.08），可能因为结构化 catalog 让 jev 更确定"确实有匹配的技能"。
+    </div>
+  </div>
+</div>
+
+<!-- ===== ANALYSIS ===== -->
+<div class="analysis">
+  <h2>分析结论</h2>
+  <p><b style="color:var(--text-bright)">核心发现：choice 的归一化分布天然要求 jev 同时看到所有选项</b></p>
+  <p>jev 的 choice 返回的是归一化概率分布（所有选项概率之和 = 1）。要做出归一化，jev <b>必须同时看到所有选项</b>的 criteria。这意味着无论 description 放在 state 还是 criteria，jev 在评估 choice 时都天然看到了全部技能描述。</p>
+  <p style="margin-top:12px"><b style="color:var(--text-bright)">两种方案在 no_skill_needed 决策上表现相当</b></p>
+  <p>5 个场景中，方案 A（state 含 catalog）和方案 B（criteria 含 description）的 no_skill_needed 概率差异很小（±0.05 量级）。方案 A 在 roster 盲区场景略好（0.58 vs 0.52），可能因为结构化 catalog 更易于 jev 做全局对比，但差异不足以证明额外的 token 成本是值得的。</p>
+  <p style="margin-top:12px"><b style="color:var(--text-bright)">方案 B（当前设计）的 token 优势</b></p>
+  <p>方案 A 在 state 中放 catalog（12 个 name + description），criteria 中放 name——description 只出现一次。方案 B 在 criteria 中放 "name: description"——description 也只出现一次。两者 token 成本基本相同，因为 description 无论放在哪里都只出现一次。</p>
+  <p style="margin-top:12px"><b style="color:var(--text-bright)">方案 A 的理论优势</b></p>
+  <p>当 roster 很大（如 50+ 技能）时，方案 A 的结构化 catalog 可能更易于 jev 做全局扫描——因为 state 中的 catalog 是一个独立的 JSON 数组，jev 可以先扫描 catalog 形成全局认知，再做 choice。而方案 B 的 criteria 是一个 key-value map，jev 可能更倾向于逐个选项匹配而非全局扫描。</p>
+  <p style="margin-top:12px"><b style="color:var(--text-bright)" class="hl">建议：保持当前设计（方案 B），但关注大 roster 场景</b></p>
+  <p>当前设计在 12 技能下表现良好。当 roster 超过 50 时（走两步流程），step 1 的 per-skill noul 不涉及 no_skill_needed 判断；step 2 的 choice 只有 top-5 + no_skill_needed，选项少，两种方案差异更小。如果未来发现大 roster 的 no_skill_needed 决策质量下降，可以考虑在 state 中加入 catalog 作为补充上下文。</p>
+</div>
+
+</div>
+</body>
+</html>

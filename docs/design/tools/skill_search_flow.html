@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<!--
+  skill_search 接口流程图（博客嵌入版 v3）
+  嵌入方式：
+  <iframe src="skill_search_flow.html" style="width:100%;max-width:980px;height:1480px;border:0" loading="lazy"></iframe>
+  事实来源：src/jev_harness_tool/tools/skill_search.py、docs/design/tools/skill_search.md
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>skill_search · 接口设计与取舍</title>
+<style>
+  :root {
+    --paper: oklch(98.5% 0.004 90);
+    --ink: oklch(24% 0.02 260);
+    --ink-2: oklch(46% 0.02 260);
+    --line: oklch(88% 0.01 260);
+    --select: oklch(55% 0.13 155);
+    --review: oklch(64% 0.14 75);
+    --skip: oklch(62% 0.01 260);
+    --invalid: oklch(56% 0.16 25);
+    --accent: oklch(45% 0.09 250);
+    --mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+    --serif: "Songti SC", "Noto Serif SC", "Source Han Serif SC", Georgia, serif;
+    --sans: -apple-system, "PingFang SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--paper); color: var(--ink);
+    font-family: var(--sans); font-size: 14px; line-height: 1.6;
+    padding: 28px 20px 32px; -webkit-font-smoothing: antialiased;
+  }
+  .frame { max-width: 940px; margin: 0 auto; }
+
+  header { display: flex; align-items: baseline; justify-content: space-between;
+           margin-bottom: 6px; gap: 12px; flex-wrap: wrap; }
+  h1 { font-family: var(--serif); font-size: 20px; font-weight: 700; letter-spacing: 0.02em; }
+  h1 code { font-family: var(--mono); font-size: 19px; color: var(--accent); }
+  .tagline { font-size: 12.5px; color: var(--ink-2); margin-bottom: 20px; max-width: 640px; }
+  .tagline b { color: var(--ink); font-weight: 600; }
+  .replay { font-size: 12px; color: var(--ink-2); background: none;
+            border: 1px solid var(--line); border-radius: 999px;
+            padding: 3px 12px; cursor: pointer; transition: color .2s, border-color .2s; }
+  .replay:hover { color: var(--accent); border-color: var(--accent); }
+
+  /* ---------- 主流程：输入 → 组装 → 推理 → 输出 ---------- */
+  .flow { display: grid; grid-template-columns: 0.95fr 30px 1.45fr 30px 0.62fr 30px 1.05fr; align-items: stretch; }
+  .stage-label { font-family: var(--serif); font-size: 13px; font-weight: 700;
+                 letter-spacing: 0.14em; color: var(--ink-2); margin-bottom: 10px; }
+  .card { background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+
+  .wire { position: relative; align-self: center; height: 2px; }
+  .wire::before { content: ""; position: absolute; inset: 0;
+    background: repeating-linear-gradient(90deg, var(--line) 0 5px, transparent 5px 11px); }
+  .wire i { position: absolute; top: 50%; left: 0; width: 7px; height: 7px; margin-top: -3.5px;
+    border-radius: 50%; background: var(--accent); animation: travel 2.6s linear infinite; opacity: 0; }
+  .wire i:nth-child(2) { animation-delay: 1.3s; }
+  @keyframes travel { 0% { left: 0; opacity: 0; } 12% { opacity: 1; }
+    88% { opacity: 1; } 100% { left: calc(100% - 7px); opacity: 0; } }
+
+  /* 阶段 1：输入 */
+  .field { padding: 6px 0; border-top: 1px dashed var(--line); }
+  .field:first-of-type { border-top: 0; padding-top: 0; }
+  .field .k { font-family: var(--mono); font-size: 12.5px; font-weight: 600; }
+  .field .t { font-family: var(--mono); font-size: 10.5px; color: var(--ink-2); margin-left: 5px; }
+  .field .d { font-size: 12px; color: var(--ink-2); }
+  .req { font-size: 10px; font-weight: 700; letter-spacing: 0.08em; color: var(--accent);
+         border: 1px solid currentColor; border-radius: 4px; padding: 0 4px; margin-left: 5px; vertical-align: 1px; }
+  .opt { font-size: 10px; letter-spacing: 0.08em; color: var(--ink-2);
+         border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; margin-left: 5px; vertical-align: 1px; }
+
+  /* 阶段 2：组装（完整载荷） */
+  .assemble { border-color: var(--accent); border-width: 1px; }
+  .assemble .cap { font-size: 11px; color: var(--ink-2); margin-bottom: 8px; }
+  .blk { border: 1px solid var(--line); border-radius: 8px; padding: 8px 11px; margin-top: 8px; }
+  .blk:first-of-type { margin-top: 0; }
+  .blk .k { font-family: var(--mono); font-size: 12px; font-weight: 700; color: var(--accent); }
+  .blk .tag { font-family: var(--mono); font-size: 10px; color: var(--ink-2); margin-left: 6px; }
+  .kv { font-family: var(--mono); font-size: 11px; color: var(--ink-2); margin-top: 4px; line-height: 1.7; }
+  .kv b { color: var(--ink); font-weight: 600; }
+  .blk .why-line { font-size: 11px; color: var(--ink-2); margin-top: 5px;
+                   border-top: 1px dashed var(--line); padding-top: 5px; }
+  .blk .why-line b { color: var(--ink); font-weight: 600; }
+  .crit { font-family: var(--mono); font-size: 11px; margin-top: 5px; }
+  .crit div { padding: 2px 0 2px 10px; border-left: 2px solid var(--line); color: var(--ink-2);
+              white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .crit div b { color: var(--ink); font-weight: 600; }
+  .crit .esc { border-left-color: var(--review); color: var(--ink); }
+  .crit .esc b { color: var(--review); }
+
+  /* 阶段 3：推理 */
+  .infer {
+    align-self: center; text-align: center;
+    background: var(--ink); color: var(--paper);
+    border-radius: 12px; padding: 14px 10px;
+    box-shadow: 0 8px 24px oklch(24% 0.02 260 / 0.14);
+  }
+  .infer code { font-family: var(--mono); font-size: 13.5px; font-weight: 600; }
+  .infer .sub { font-size: 10.5px; opacity: 0.65; letter-spacing: 0.1em; margin-top: 3px; line-height: 1.6; }
+
+  /* 阶段 4：输出概率条 */
+  .bar-row { display: grid; grid-template-columns: 108px 1fr 42px; align-items: center;
+             gap: 7px; padding: 5px 0; }
+  .bar-row .nm { font-family: var(--mono); font-size: 11px; font-weight: 600;
+                 white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bar-row .nm.none { color: var(--review); }
+  .track { height: 13px; background: var(--paper); border: 1px solid var(--line);
+           border-radius: 4px; overflow: hidden; }
+  .fill { height: 100%; width: 0; border-radius: 3px; background: var(--skip);
+          transition: width 1s cubic-bezier(.22,.8,.3,1); }
+  .bar-row.win .fill { background: var(--select); }
+  .bar-row.none-row .fill { background: var(--review); }
+  .pv { font-family: var(--mono); font-size: 11px; text-align: right; color: var(--ink-2); }
+  .verdict-tag { display: inline-block; font-family: var(--mono); font-size: 9.5px; font-weight: 700;
+                 border-radius: 4px; padding: 0 4px; margin-left: 5px; vertical-align: 1px; }
+  .vt-select { color: var(--select); border: 1px solid var(--select); }
+  .vt-skip { color: var(--skip); border: 1px solid var(--skip); }
+  .meta { margin-top: 9px; padding-top: 8px; border-top: 1px solid var(--line);
+          font-family: var(--mono); font-size: 11px; color: var(--ink-2); line-height: 1.75; }
+  .meta b { color: var(--ink); font-weight: 600; }
+
+  /* ---------- 为什么这样设计 ---------- */
+  .why { margin-top: 24px; }
+  .why > h2 { font-family: var(--serif); font-size: 16px; font-weight: 700; margin-bottom: 4px; }
+  .why > p { font-size: 12.5px; color: var(--ink-2); margin-bottom: 12px; }
+  .cmp { background: #fff; border: 1px solid var(--line); border-radius: 10px;
+         padding: 12px 16px 13px; margin-top: 10px; }
+  .cmp .prob { font-size: 13px; font-weight: 700; margin-bottom: 3px; }
+  .cmp .prob .qno { font-family: var(--mono); color: var(--accent); margin-right: 6px; }
+  .cmp .setup { font-size: 12px; color: var(--ink-2); margin-bottom: 9px; }
+  .cmp .setup b { color: var(--ink); font-weight: 600; }
+  .sides { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .side { border-radius: 8px; padding: 9px 12px; font-size: 12px; line-height: 1.65; }
+  .side .t { font-family: var(--mono); font-size: 11px; font-weight: 700;
+             letter-spacing: 0.04em; display: block; margin-bottom: 3px; }
+  .side.bad { background: oklch(96% 0.02 25); border: 1px dashed oklch(75% 0.09 25); }
+  .side.bad .t { color: var(--invalid); }
+  .side.good { background: oklch(96% 0.02 155); border: 1px solid oklch(80% 0.08 155); }
+  .side.good .t { color: var(--select); }
+  .side .ev { display: block; margin-top: 5px; font-family: var(--mono); font-size: 10.5px;
+              color: var(--ink-2); }
+  .cmp code, .notes code { font-family: var(--mono); font-size: 11px; color: var(--ink);
+                background: var(--paper); padding: 0 4px; border-radius: 4px; }
+
+  /* 注意事项 */
+  .notes { margin-top: 18px; border: 1px solid var(--line); border-left: 3px solid var(--review);
+           border-radius: 8px; background: #fff; padding: 12px 16px; }
+  .notes h2 { font-family: var(--serif); font-size: 13px; font-weight: 700;
+              letter-spacing: 0.14em; color: var(--ink-2); margin-bottom: 6px; }
+  .notes ul { list-style: none; }
+  .notes li { font-size: 12.5px; color: var(--ink-2); padding: 3px 0 3px 16px; position: relative; }
+  .notes li::before { content: ""; position: absolute; left: 2px; top: 12px;
+                      width: 5px; height: 5px; border-radius: 50%; background: var(--review); }
+  .foot { margin-top: 14px; font-size: 11px; color: var(--ink-2); }
+
+  /* ---------- 入场编排 ---------- */
+  .rise { opacity: 0; transform: translateY(10px); }
+  body.played .rise { animation: rise .55s cubic-bezier(.22,.8,.3,1) forwards; }
+  @keyframes rise { to { opacity: 1; transform: none; } }
+
+  @media (max-width: 860px) {
+    .flow { grid-template-columns: 1fr; grid-template-rows: auto 36px auto 36px auto 36px auto; }
+    .wire { width: 2px; height: 36px; justify-self: center; }
+    .wire::before { background: repeating-linear-gradient(180deg, var(--line) 0 5px, transparent 5px 11px); }
+    .wire i { left: 50%; margin-left: -3.5px; margin-top: 0; animation-name: travelY; }
+    @keyframes travelY { 0% { top: 0; opacity: 0; } 12% { opacity: 1; }
+      88% { opacity: 1; } 100% { top: calc(100% - 7px); opacity: 0; } }
+    .infer { justify-self: center; padding: 12px 26px; }
+    .sides { grid-template-columns: 1fr; }
+    .bar-row { grid-template-columns: 96px 1fr 40px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .rise { opacity: 1 !important; transform: none !important; animation: none !important; }
+    .wire i { display: none; }
+    .fill { transition: none !important; }
+  }
+</style>
+</head>
+<body>
+<div class="frame">
+  <header>
+    <h1><code>skill_search</code> · 接口设计与取舍</h1>
+    <button class="replay" id="replay" type="button">重播动画</button>
+  </header>
+  <p class="tagline">harness 框架原本把全部技能描述塞进 system prompt，让主模型「看着办」——token 随技能数线性增长，且判断不可校准。<b>skill_search 把「选哪个技能」变成一次独立的决策调用</b>：输入查询与候选花名册，输出每个技能的校准概率与建议，是否加载由调用方决定。</p>
+
+  <div class="flow">
+    <!-- 阶段 1：输入 -->
+    <section class="card rise" style="animation-delay:.05s">
+      <div class="stage-label">1 · 输入</div>
+      <div class="field">
+        <span class="k">query</span><span class="t">string</span><span class="req">必填</span>
+        <div class="d">用户查询原文，不改写、不摘要</div>
+      </div>
+      <div class="field">
+        <span class="k">skills</span><span class="t">array</span><span class="req">必填</span>
+        <div class="d">候选花名册 <code style="font-family:var(--mono);font-size:11px">[{name, description}]</code></div>
+      </div>
+      <div class="field">
+        <span class="k">threshold…</span><span class="t">9 个参数</span><span class="opt">可选</span>
+        <div class="d">全部有默认值，响应回显实际使用值</div>
+      </div>
+    </section>
+
+    <div class="wire" aria-hidden="true"><i></i><i></i></div>
+
+    <!-- 阶段 2：组装 -->
+    <section class="card assemble rise" style="animation-delay:.3s">
+      <div class="stage-label">2 · 组装（服务端完成，调用方无感）</div>
+      <div class="cap">一次调用就是下面这份 JSON：一份共享 <b>state</b>（这次要判断什么）+ 一组 <b>questions</b>（这里只有 1 道单选题）。字符串有节选，<span style="font-family:var(--mono)">//</span> 为注解。</div>
+      <style scoped>
+        .code { background: oklch(20% 0.02 260); border-radius: 8px; padding: 12px 14px; overflow-x: auto; }
+        .code pre { font-family: var(--mono); font-size: 10.8px; line-height: 1.8; color: oklch(86% 0.02 260); }
+        .c-key { color: oklch(80% 0.09 230); }
+        .c-str { color: oklch(83% 0.09 145); }
+        .c-cmt { color: oklch(58% 0.02 260); font-style: italic; }
+        .c-esc { color: oklch(76% 0.13 75); font-weight: 700; }
+      </style>
+      <div class="code"><pre>{
+  <span class="c-key">"state"</span>: {                  <span class="c-cmt">// 共享上下文：只描述任务，不含花名册</span>
+    <span class="c-key">"task"</span>: <span class="c-str">"判断哪个候选技能最适合查询，或是否不需要任何技能"</span>,
+    <span class="c-key">"context"</span>: <span class="c-str">"用户发送了一条查询。助手有一份候选技能列表，每个技能
+            有名称和描述。技能是完成某类特定任务的指导说明、流程规范
+            或最佳实践——不是仅仅与查询共享关键词的工具或 API。
+            加载技能意味着遵循其文档化的流程来处理请求。"</span>,
+    <span class="c-key">"query"</span>: <span class="c-str">"帮我做一份介绍公司 Q3 业绩的 PPT"</span>   <span class="c-cmt">// ← 输入的 query 原样放这</span>
+  },
+  <span class="c-key">"questions"</span>: {              <span class="c-cmt">// 问题集：一次调用可带多题，这里 1 道单选</span>
+    <span class="c-key">"pick"</span>: {
+      <span class="c-key">"type"</span>: <span class="c-str">"choice"</span>,
+      <span class="c-key">"instructions"</span>: <span class="c-str">"选出真正需要加载并遵循其指导的那个选项。只有
+                流程直接对应请求才选，共享关键词不算…"</span>,
+      <span class="c-key">"criteria"</span>: {             <span class="c-cmt">// 选项 = 花名册内联 + 逃生舱</span>
+        <span class="c-key">"s0"</span>: <span class="c-str">"ppt-architect: Create presentation slide decks…"</span>,
+        <span class="c-key">"s1"</span>: <span class="c-str">"html-ppt: Author professional HTML presentations…"</span>,
+        <span class="c-key">"s2"</span>: <span class="c-str">"pdf: Read, extract, merge and split PDF files."</span>,
+        <span class="c-esc">"__no_skill_needed__"</span>: <span class="c-str">"不需要任何候选技能：纯文字可答，
+                      或候选集中没有覆盖该任务的技能"</span>
+      }
+    }
+  }
+}</pre></div>
+      <div class="why-line" style="font-size:11px;color:var(--ink-2);margin-top:7px">选项 key 用<b>位置编号</b>（s0/s1…）而非技能名，调用方的 name 原样透传——重名技能不冲突；返回的分布里每个 key 对应一个概率</div>
+    </section>
+
+    <div class="wire" aria-hidden="true"><i></i><i></i></div>
+
+    <!-- 阶段 3：推理 -->
+    <section class="infer rise" style="animation-delay:.55s">
+      <code>推理</code>
+      <div class="sub">决策模型一次性<br>回答全部问题<br>返回归一化概率分布</div>
+    </section>
+
+    <div class="wire" aria-hidden="true"><i></i><i></i></div>
+
+    <!-- 阶段 4：输出 -->
+    <section class="card rise" style="animation-delay:.8s">
+      <div class="stage-label">4 · 输出 · 每项一个校准概率</div>
+      <div id="bars">
+        <div class="bar-row win" data-p="0.91"><span class="nm">ppt-architect<span class="verdict-tag vt-select">select</span></span><div class="track"><div class="fill"></div></div><span class="pv">0.00</span></div>
+        <div class="bar-row" data-p="0.05"><span class="nm">html-ppt<span class="verdict-tag vt-skip">skip</span></span><div class="track"><div class="fill"></div></div><span class="pv">0.00</span></div>
+        <div class="bar-row" data-p="0.02"><span class="nm">pdf<span class="verdict-tag vt-skip">skip</span></span><div class="track"><div class="fill"></div></div><span class="pv">0.00</span></div>
+        <div class="bar-row none-row" data-p="0.02"><span class="nm none">__no_skill__</span><div class="track"><div class="fill"></div></div><span class="pv">0.00</span></div>
+      </div>
+      <div class="meta rise" style="animation-delay:1.1s">
+        <b>none_probability</b> 0.02 —「不需要任何技能」的概率<br>
+        <b>margin</b> 0.86 — 冠亚军概率差，不足则降级 review<br>
+        <b>usage</b> input_tokens · cost_usd 逐次透明
+      </div>
+    </section>
+  </div>
+
+  <!-- 为什么这样设计 -->
+  <section class="why">
+    <h2 class="rise" style="animation-delay:1s">为什么这么设计</h2>
+    <p class="rise" style="animation-delay:1.05s">三个关键取舍，每个都有真实 API 的 A/B 实验支撑（6 个测试场景：1 个明确命中、1 个纯文字可答、4 个「花名册故意缺了对应技能」的盲区场景）。</p>
+
+    <div class="cmp rise" style="animation-delay:1.15s">
+      <div class="prob"><span class="qno">Q1</span>怎么判断「这个请求根本不需要任何技能」？</div>
+      <div class="setup">单选题必然产生一个赢家，但<b>概率最高 ≠ 正确</b>——如果花名册里其实没有合适的技能，模型也会硬选一个。必须给模型一个说出「都不合适」的出口。问题是：这个出口放在哪？</div>
+      <div class="sides">
+        <div class="side bad"><span class="t">✗ 方案 A：先做一道独立的是非题</span>
+          先单独问「这个查询需要技能吗？」，回答「需要」再进入单选。但这道是非题<b>只看 query、看不到花名册</b>。例：用户说「检查 MCP 服务质量」，花名册里只有「构建 MCP 服务」的技能——是非题回答「需要技能」（没错），于是流程继续，最终错选「构建」技能。
+          <span class="ev">实验：4 个盲区场景误判 3 个</span>
+        </div>
+        <div class="side good"><span class="t">✓ 方案 B：把「不需要技能」做成单选题的一个选项</span>
+          <code>__no_skill_needed__</code> 与所有技能同场竞技，能<b>同时看到 query 和全部技能描述</b>，于是分得清两种情况：纯文字就能答（不需要技能），以及「需要技能、但花名册里没有」（覆盖盲区）。
+          <span class="ev">实验：6/6 全部正确，盲区场景 no_skill 概率 0.63–1.00</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="cmp rise" style="animation-delay:1.25s">
+      <div class="prob"><span class="qno">Q2</span>怎么防止模型因为「关键词沾边」就乱选？</div>
+      <div class="setup">「检查 MCP 服务」和「构建 MCP 服务」共享大量关键词。如果提问方式不约束判断标准，模型会按话题相关性作答，把「同领域」当成「能解决」。</div>
+      <div class="sides">
+        <div class="side bad"><span class="t">✗ 方案 A：问「这个技能与查询相关吗」</span>
+          「相关」是模糊标准——共享关键词、属于同一领域都算相关。模型看到「MCP」「检查」就选了「构建 MCP 服务」的技能。
+          <span class="ev">实验：旧措辞 6 场景只对 2 个</span>
+        </div>
+        <div class="side good"><span class="t">✓ 方案 B：把判断标准写进问题里</span>
+          问题改为「遵循这个技能的<b>文档化流程</b>，是否会实质性改变这个请求的处理方式」——共享关键词不算数，流程必须直接对应请求的具体任务。
+          <span class="ev">实验：新措辞 6/6，3 个盲区场景直接翻转</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="cmp rise" style="animation-delay:1.35s">
+      <div class="prob"><span class="qno">Q3</span>技能描述放在请求的哪个位置？</div>
+      <div class="setup">一次调用由「共享上下文 state + 问题集」组成。全部技能描述既可以塞进 state，也可以写进每个选项的定义里——两种放法模型都能看到全部技能，差别在哪？</div>
+      <div class="sides">
+        <div class="side bad"><span class="t">✗ 方案 A：全量塞进 state</span>
+          state 是「任务描述」的位置，塞进整个花名册会带入 triggers、路径、版本等<b>与判断无关的字段</b>，token 更贵，还稀释判断焦点。
+          <span class="ev">实验：判断质量与方案 B 持平，但 token 成本更高</span>
+        </div>
+        <div class="side good"><span class="t">✓ 方案 B：内联为每个选项的定义</span>
+          state 只留 task / context / query。单选题的归一化分布本来就要求模型同时比较全部选项，<b>全局感知没有任何损失</b>，token 却更省。
+          <span class="ev">实验：质量持平、成本更低 → 采用</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 输入注意事项 -->
+  <aside class="notes rise" style="animation-delay:1.45s">
+    <h2>输入注意事项</h2>
+    <ul>
+      <li><code>description</code> 超过 500 字符会被截断，且该技能<b>永不自动 select</b>，只进 review——截断意味着信息不全，不做自动裁决</li>
+      <li><code>skills</code> ＞ 50 时自动走两步（先逐技能独立打分召回 top-5，再单选精排），对调用方无感</li>
+      <li>模型答案缺失或畸形的技能标 <code>invalid_response</code>，只影响该项，绝不伪装成 select 或 skip</li>
+      <li>阈值拿不准就用默认值，再按响应里回显的 <code>thresholds</code> 与 <code>usage</code> 逐步调校</li>
+    </ul>
+  </aside>
+
+  <p class="foot rise" style="animation-delay:1.55s">数据与实验依据：docs/design/tools/skill_search.md · 实现：src/jev_harness_tool/tools/skill_search.py</p>
+</div>
+
+<script>
+  var reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  function animateBars(delay) {
+    var rows = document.querySelectorAll('#bars .bar-row');
+    rows.forEach(function (row, i) {
+      var p = parseFloat(row.dataset.p);
+      var fill = row.querySelector('.fill');
+      var pv = row.querySelector('.pv');
+      if (reduced) { fill.style.width = (p * 100) + '%'; pv.textContent = p.toFixed(2); return; }
+      fill.style.width = '0'; pv.textContent = '0.00';
+      setTimeout(function () {
+        fill.style.width = (p * 100) + '%';
+        var t0 = performance.now(), dur = 1000;
+        (function tick(t) {
+          var k = Math.min(1, (t - t0) / dur);
+          pv.textContent = (p * (1 - Math.pow(1 - k, 3))).toFixed(2);
+          if (k < 1) requestAnimationFrame(tick);
+        })(t0);
+      }, delay + i * 160);
+    });
+  }
+
+  function play() {
+    document.body.classList.remove('played');
+    void document.body.offsetWidth;
+    document.body.classList.add('played');
+    animateBars(1000);
+  }
+
+  if (reduced) { document.body.classList.add('played'); animateBars(0); }
+  else { play(); }
+  document.getElementById('replay').addEventListener('click', play);
+</script>
+</body>
+</html>
