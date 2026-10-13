@@ -1,6 +1,6 @@
-# MCP 工具验收（8 工具，M1–M4）
+# MCP 工具验收（9 工具，M1–M4）
 
-验收日期：2026-09-29。2026-10-13 更新：skill_search 收敛为单一 auto 模式（详设 v2.0）；reference_verify 升级 v1.1（可选 context）；移除 `route_decide` 工具（routing 仅保留 `effort_route`），相应测试同步删除。当前测试规模：198 mock（`pytest -m "not real"`）+ 35 real（`pytest -m real`），mock 全绿。
+验收日期：2026-09-29。2026-10-13 更新：skill_search 收敛为单一 auto 模式（详设 v2.0）；reference_verify 升级 v1.1（可选 context）；移除 `route_decide` 工具（routing 仅保留 `effort_route`），相应测试同步删除；新增 `input_llm_guardrail`（9 hazard noul + true/false criteria，v3 措辞精简）。当前测试规模：237 mock（`pytest -m "not real"`）+ 37 real（`pytest -m real`），mock 全绿。
 测试文件位于 `tests/`，与工具一一对应。
 
 ## P0：真实 API 语义（每工具 ≥1 real 用例通过）
@@ -15,6 +15,7 @@
 | `result_verify` | tests/test_result_verify.py | 完整满足要求的产出判 passed（probability ≥ 0.8）；不完整产出判 review/failed（not passed） |
 | `tool_risk_gate` | tests/test_tool_risk_gate.py | 危险命令绝不被自动放行（block/review，risk > 0.5）；安全只读操作 allow（risk < 0.3） |
 | `context_filter` | tests/test_context_filter.py | 单条路径：过期 README 条目判 drop/truncate，冗余/低相关信号正确；批量路径：相关条目 keep、无关条目 drop/truncate、无 invalid |
+| `input_llm_guardrail` | tests/test_input_llm_guardrail.py | **真实 API 未验收**（README 标 `未验证`）。mock 39 项全绿：block/pass/support/review 正常路径、9 hazard 触发真值表、优先级裁决、命名策略、截断封顶、重试纪律 |
 
 ## P0：错误纪律（断言请求数）
 
@@ -28,9 +29,10 @@
 ## P0：fail-closed
 
 - 缺失/畸形答案标 `invalid_response`，绝不伪装成"通过"或"否定"（各工具 mock 用例覆盖：noul 越界、choice 非 argmax、概率键不匹配、answers 缺失等）。
-- 被截断的输入永不自动通过：effort_route 截断降级 review；memory_gate 截断封顶 inject_index；reference_verify 截断对永不 supported；context_filter 截断条目永不自动 keep；result_verify 截断永不 passed；tool_risk_gate 截断升档。
+- 被截断的输入永不自动通过：effort_route 截断降级 review；memory_gate 截断封顶 inject_index；reference_verify 截断对永不 supported；context_filter 截断条目永不自动 keep；result_verify 截断永不 passed；tool_risk_gate 截断升档；input_llm_guardrail 截断封顶 pass→review（不封顶 block/support）。
 - 现成端点 200 但契约畸形 → JevProtocolError → 工具层 verdict=invalid_response（context_filter / tool_risk_gate）。
 - confidence 未知视为不满足任何阈值（context_filter 保守化、tool_risk_gate 升档）。
+- input_llm_guardrail：单个 hazard noul 畸形仅该 hazard 置 None 跳过，不炸整体；全部 9 个 noul 畸形 → invalid_response。
 
 ## P1：工程约束
 
@@ -40,4 +42,5 @@
 | usage 透传 | decide 类工具回显完整 usage（input_tokens / cost_usd / credits_remaining_usd）；批量工具多批 usage 求和；现成端点 usage 缺失/畸形时置 None 不判 invalid |
 | 批量分批合并 | skill_search / reference_verify / context_filter 按 64k/32k×0.85 token 预算装箱、多批并发、state 随每批重发、结果按输入顺序回填（wire 位置 key，外部 id 原样透传） |
 | margin 判据 | effort_route / skill_search / reference_verify / context_filter(批量)：冠亚军 margin 不足降级 review，不自动裁决 |
+| 优先级裁决 | input_llm_guardrail：多 hazard 同时触发按 support > block > review > pass 取最高；命名策略 strict/permissive 快捷设置双阈值，独立阈值参数可覆盖 |
 | 空输入零请求 | skill_search 空 skills、reference_verify 空 pairs 直接返回空结果，不发起 HTTP 请求（断言 mock 请求数 == 0） |

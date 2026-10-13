@@ -315,6 +315,8 @@ criteria：
 
 LLM 输入消息护栏：评估用户消息的 9 种 hazard 概率，返回 pass/review/block/support 建议。9 个独立 hazard noul（每个含 true/false criteria），单次 /decide 调用，共享 state 只发一次。
 
+![input_llm_guardrail 动画](docs/design/tools/llm_guardrail_motion/llm_guardrail_motion.gif)
+
 **state：**
 
 ```json
