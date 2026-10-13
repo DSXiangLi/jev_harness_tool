@@ -44,11 +44,23 @@ def score_question(instructions: str, criteria: Sequence[str]) -> dict[str, Any]
     }
 
 
-def noul_question(instructions: str) -> dict[str, Any]:
-    """校准是/否问题，返回 0–1 概率。"""
+def noul_question(
+    instructions: str,
+    criteria: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    """校准是/否问题，返回 0–1 概率。
+
+    criteria（可选）为 ``{"true": yes 定义, "false": no 定义}``，
+    给 jev 提供是/否两端的精确定义，提升校准精度。
+    """
     if not instructions or not instructions.strip():
         raise ValueError("instructions must be a non-empty string")
-    return {
-        "type": "noul",
-        "instructions": instructions,
-    }
+    q: dict[str, Any] = {"type": "noul", "instructions": instructions}
+    if criteria is not None:
+        if set(criteria) != {"true", "false"}:
+            raise ValueError("noul criteria must have exactly keys 'true' and 'false'")
+        for key, value in criteria.items():
+            if not value or not isinstance(value, str):
+                raise ValueError(f"noul criteria {key!r} must be a non-empty string")
+        q["criteria"] = dict(criteria)
+    return q
